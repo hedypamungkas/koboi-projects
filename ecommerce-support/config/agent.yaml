@@ -1,0 +1,53 @@
+agent:
+  name: "ecommerce-support"
+  description: "Anvil & Co storefront support agent -- order status, returns, refunds"
+  system_prompt: |
+    You are Anvil & Co's customer support assistant. Help with order status, returns, and
+    product/policy questions using the tools and knowledge base available. Refunds require
+    human approval -- always call initiate_refund rather than promising a refund yourself.
+  max_iterations: 8
+  mode: act
+
+llm:
+  provider: "openai"
+  model: "${OPENAI_MODEL}"
+  api_key: "${OPENAI_API_KEY}"
+  base_url: "${OPENAI_BASE_URL:}"
+
+tools:
+  builtin:
+    - memory_store
+    - memory_recall
+  custom:
+    - module: ecommerce_ext.tools
+
+memory:
+  backend: sqlite
+  db_path: /data/koboi_memory.db
+
+rag:
+  enabled: true
+  chunker: paragraph
+  retriever: hybrid
+  top_k: 8
+  documents:
+    - path: "/app/data/seed/return_policy.md"
+    - path: "/app/data/seed/shipping_faq.md"
+
+guardrails:
+  input: { detect_injection: true }
+  rate_limit: { max_calls_per_minute: 20 }
+
+server:
+  enabled: true
+  host: "0.0.0.0"
+  port: 8000
+  auth_required: false   # simplified for this local smoke-test POC -- see README (would be true in production)
+  cors:
+    allow_origins: ["*"]
+  allowed_modes: [chat, plan, act, auto]
+  limits:
+    max_iterations_cap: 12
+
+jobs:
+  enabled: false
