@@ -1,0 +1,46 @@
+agent:
+  name: "invoice-reconciliation"
+  system_prompt: |
+    You reconcile vendor invoices against purchase orders for Ledgerline Manufacturing.
+    Use the ERP tools (fetch_invoice, fetch_purchase_order, three_way_match) to fetch and
+    match records -- they are read-only. Only call post_journal_entry when the controller
+    explicitly approves a posting -- it will pause for human approval automatically because
+    it is a destructive, ledger-writing action.
+  max_iterations: 10
+
+llm:
+  provider: "openai"
+  model: "${OPENAI_MODEL}"
+  api_key: "${OPENAI_API_KEY}"
+  base_url: "${OPENAI_BASE_URL:}"
+
+memory:
+  backend: sqlite
+  db_path: "/data/koboi_memory.db"
+
+tools:
+  custom:
+    - module: finance_ext.tools
+
+mcp:
+  servers:
+    - command: python3
+      args: ["/app/erp_mcp_server.py"]
+
+sandbox:
+  backend: restricted
+
+server:
+  auth_required: false   # simplified for this local smoke-test POC -- production would set this true
+  allowed_modes: [chat, act]
+  # koboi only adds CORSMiddleware when server.cors is explicitly set (no
+  # `cors:` block == no cross-origin reads at all, by design -- see
+  # koboi/server/app.py's C4 comment). The frontend dashboard is served from a
+  # different origin (localhost:3003) than this API (localhost:8003), so it
+  # needs both an allowed origin AND X-Session-Id exposed -- browsers don't
+  # let JS read response headers cross-origin unless the server explicitly
+  # lists them in Access-Control-Expose-Headers, and app.js reads
+  # X-Session-Id from the response to carry the session across turns.
+  cors:
+    allow_origins: ["http://localhost:3003"]
+    expose_headers: ["X-Session-Id"]
