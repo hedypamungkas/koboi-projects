@@ -1,314 +1,190 @@
-# Sector One-Pager: Healthcare — Pre-Visit Patient Intake & Triage Assistant
+# Riverside Family Clinic: Pre-Visit Patient Intake
 
-> **Status:** Design draft · **Date:** 2026-07-03
-> **Depends on:** [`00-consuming-koboi-server.md`](./00-consuming-koboi-server.md) — read that first for endpoints,
-> auth, chat-vs-job modes, SSE event shape, and extension points. This doc only covers what's specific to
-> pre-visit patient intake.
+A chat that asks patients about their symptoms before the visit, checks their answers against the clinic's
+own protocol documents for anything urgent, and hands the doctor a clean summary — it never diagnoses and
+never touches the patient record.
 
----
+> Reads on top of [`00-consuming-koboi-server.md`](./00-consuming-koboi-server.md). This doc only covers
+> what's specific to intake.
 
-## 1. Context & assumptions
+## The scenario
 
-A clinic wants a chatbot patients interact with **before** their visit: it asks structured symptom/history
-questions, cross-checks answers against clinical protocol/formulary documents for red-flag criteria (e.g.
-"chest pain + shortness of breath → escalate to urgent care now"), and hands the clinician a structured
-summary. It never diagnoses and never touches the EHR directly.
+Riverside Family Clinic runs four locations and wants patients to fill out their symptom history online
+before they arrive, instead of on a clipboard in the waiting room. A pre-visit chat asks structured
+questions — what's wrong, since when, any other conditions — and checks the answers against the clinic's
+triage protocol (a set of documents written and maintained by Riverside's own clinical staff) for red-flag
+combinations like chest pain plus shortness of breath. If something looks urgent, it flags the session for
+a nurse to look at right away. Otherwise, the doctor just sees a clean summary before the patient sits down.
+The chat never guesses at a diagnosis, and it never writes anything into Riverside's patient record system.
 
-Assumptions this design bakes in:
+## What you get for free
 
-- **Interactive chat only, `mode: chat` (or `plan` for internal staff review runs) — never `act`.** This is a
-  live conversation with a patient, not a batch/autonomous workflow. Per doc 00 §1, `act` mode implies
-  tool-driven autonomy; intake has no business calling `act`-style tool chains against a patient in the loop.
-  `server.allowed_modes` for this deployment should be restricted to `chat,plan` (see §4 config).
-- **The RAG corpus is clinical protocol/formulary documents** — triage criteria, red-flag symptom lists,
-  medication formulary notes — supplied and version-controlled by the clinic's clinical staff, not by
-  engineering. This is reference material for grounding, not a source of instructions to act on.
-- **No EHR write path exists in this system, by design.** The agent produces a structured summary that a
-  human clinician reviews and manually (or via a separate, clinic-owned EHR integration) files. Koboi itself
-  never gets EHR credentials or an EHR-writing tool.
-- **PII/PHI must never reach logs or the Langfuse trace in raw form.** Patient name, DOB, phone, insurance ID,
-  and free-text symptom descriptions are all potentially PHI. Anything that leaves the request/response path
-  and lands in a persistence or observability sink must be redacted first.
-- This is a **regulated context**. Koboi-agent itself makes no HIPAA claims (see §8) — compliance is entirely
-  this project's responsibility, achieved through config choices (tracing off/scoped), guardrail design
-  (redaction), and infra controls (encryption at rest, access control) layered on top of the generic contract.
+koboi's RAG engine and chat mode are built in. Point `rag.corpus_path` at Riverside's protocol documents,
+set `mode: chat`, and patients already get an answer grounded in the clinic's own triage rules instead of
+whatever the model happens to know about medicine. No retrieval code, no chat loop, no session handling to
+write.
 
-## 2. Architecture
+That means almost none of the engineering here is "build a chatbot." The real work is the safety layer on
+top: making sure the agent can raise a flag but can never act on it, and making sure nothing sensitive a
+patient types leaks into a log file.
 
-```
-                    ┌────────────────────┐
-                    │ Patient chat widget │  (web/mobile, pre-visit)
-                    └──────────┬─────────┘
-                               │ POST /v1/chat/stream  { message, mode: "chat" }
-                               ▼
-                    ┌────────────────────────────┐
-                    │        koboi server         │
-                    │                              │
-   PRE_INPUT hook ─▶│  1. PHI/PII redact-or-block  │  (before LLM ever sees raw input,
-   (redaction        │     guardrail (input side)  │   AND before anything is logged)
-    guardrail)       │                              │
-                    │  2. RAG retrieve over         │
-                    │     clinical protocol /       │──▶ [protocol docs, formulary,
-                    │     formulary corpus           │     red-flag criteria — versioned
-                    │                              │     by clinical staff]
-                    │  3. LLM turn (grounded on      │
-                    │     retrieved protocol text)   │
-                    │                              │
-                    │  4. flag_urgent_escalation     │  SAFE tool — sets a flag +
-                    │     tool (if red-flag pattern  │  writes to review queue table;
-                    │     matched)                    │  does NOT contact EHR/911/staff
-                    │                              │  directly, just raises a flag
-                    │                              │
-   POST_OUTPUT /     │  5. Output guardrail: strip    │
-   output guardrail ─▶│     any PHI before response   │──▶ Langfuse trace (if enabled) —
-    (redaction)       │     is traced/logged           │     sees redacted text only
-                    └──────────┬───────────────────┘
-                               │ SSE stream (text_delta, tool_call,
-                               │ tool_result, complete, ...)
-                               ▼
-                    ┌────────────────────┐
-                    │ Patient chat widget │  (sees full, non-redacted answer —
-                    └────────────────────┘   redaction is a logging/tracing-side
-                                              concern, not a patient-facing one)
+Also built in: an output guardrail (`guardrails.output: {detect_sensitive: true}`) that catches API keys,
+passwords, and card numbers in the model's reply — pure YAML, no code. It stops there, though: phone
+numbers, dates of birth, and insurance IDs aren't secrets in the pattern-matching sense, so this filter
+doesn't touch them. koboi's built-in filter catches secrets, not PHI — that's the custom guardrail's job,
+below.
 
-                    ┌──────────────────────────────┐
-   structured        │  Clinician review queue        │
-   intake summary ──▶│  (separate app/table — NOT     │──▶ human reviews, decides,
-   (end of session)  │  koboi; koboi just produces     │    files to EHR themselves
-                    │  the summary text/JSON)         │
-                    └──────────────────────────────┘
-```
+## What you build
 
-Key point: redaction happens on the **logging/tracing path**, not the patient-facing response path — the
-patient needs to see their own answers reflected back normally; it's what koboi persists/traces that must be
-scrubbed. The `flag_urgent_escalation` tool and the redaction guardrail are the two sector-specific pieces;
-everything else (SSE transport, session lifecycle, auth) is generic per doc 00.
+Two small pieces, both plain extensions per doc 00 §5 — no changes to koboi itself.
 
-## 3. Project structure
+| Piece | What it does | Wired up as |
+|---|---|---|
+| `flag_urgent_escalation` tool | Marks a session for a nurse to review now. Nothing else. | A `tool`, `SAFE` risk level, registered via `tools.custom` |
+| `PHIRedactionGuardrail` | Strips phone numbers, dates of birth, and insurance IDs before anything is logged or traced | A custom guardrail, subclass of `PatternGuardrail`, registered via a `koboi.guardrails` Python entry point (doc 00 §5) |
+
+The important design choice: **this deployment has no tool that can write anywhere consequential.** There's
+no EHR tool, no filesystem write, no shell, no `git`. `flag_urgent_escalation` only adds a row to a review
+queue a human is already watching — it can't page anyone, can't write a chart, can't do anything on its own.
+Doc 00 explains that `DESTRUCTIVE` tools pause for human approval — this design skips that whole question by
+simply not giving the agent anything destructive to begin with. Safety here comes from what the agent
+*can't* do, not from a gate on what it can.
+
+### Don't lose the first message
+
+Patients usually name their main symptom in the very first message, then spend the rest of the conversation
+answering follow-up questions. koboi's default context handling trims the oldest messages first once a
+conversation outgrows the context window — exactly the message this app can't afford to lose. Setting
+`context.strategy: smart_truncation` fixes that: it always keeps the system prompt and the literal first
+user message verbatim, plus the most recent `keep_last` messages.
+
+The honest limit: it only guarantees the *first* message. A detail a patient adds in message 8 of a
+30-message conversation is just as exposed to trimming past `keep_last` as under the default strategy —
+this isn't "remember everything that matters," it's "don't lose whatever came first."
+
+## Architecture
 
 ```
-healthcare-intake/
-├── pyproject.toml                  # depends on koboi-agent[api]; registers the
-│                                    # koboi.guardrails entry point (see §4b)
-├── config/
-│   └── agent.yaml                  # mode: chat, rag:, guardrails.output, tracing (scoped/off)
-├── src/
-│   └── healthcare_ext/
-│       ├── __init__.py
-│       ├── tools.py                 # flag_urgent_escalation (SAFE)
-│       └── guardrails.py            # PHIRedactionGuardrail(PatternGuardrail)
-├── data/
-│   └── seed/                        # clinical protocol/formulary docs (RAG corpus)
-│       ├── red_flag_criteria.md
-│       └── formulary_notes.md
-└── Dockerfile                       # FROM koboi base image pattern per doc 00 §6
+  Patient's phone/laptop           koboi (Docker)                    Clinic side
+  ┌──────────────────┐   SSE      ┌──────────────────────┐
+  │  Intake chat      │──────────▶│  RAG over Riverside's │
+  │  (pre-visit)      │           │  protocol documents   │
+  └──────────────────┘           │                        │
+                                  │  flag_urgent_escalation│───▶ Clinician review queue
+                                  │  (SAFE, flag only)     │     (nurse checks this — not koboi,
+                                  │                        │      not the EHR)
+                                  │  output guardrail:     │
+                                  │  redact PHI before     │───▶ logs / traces (redacted only)
+                                  │  it's logged           │
+                                  └──────────────────────┘
 ```
 
-## 4. Key code skeletons
+The patient always sees their own words reflected back normally — redaction only affects what koboi writes
+to logs or a trace, never the conversation itself.
 
-### 4a. `flag_urgent_escalation` tool (SAFE)
+## The frontend
 
-Raises a flag for staff; it never contacts emergency services, the EHR, or a human directly — it only writes
-a row a human-facing review queue polls. Deliberately `RiskLevel.SAFE` and side-effect-minimal: no filesystem,
-no shell, no network call to an external paging system baked into the tool itself (that integration, if
-wanted, belongs in a `POST_TOOL_USE` hook that watches for this tool's calls — see doc 00 §5 table).
+Two small views, both plain web pages talking to koboi over the same `/v1/chat/stream` endpoint from doc 00:
 
-```python
-# src/healthcare_ext/tools.py
-"""healthcare_ext/tools.py -- intake-specific tools (deliberately write-light)."""
+- **Patient intake chat.** Mobile-friendly, short questions, plain language. The header says outright:
+  *"This won't diagnose you — it's here to collect your symptoms before your visit."* No medical jargon in
+  the UI copy, no green-checkmark reassurance styling that could read as a clean bill of health.
+- **Clinician summary view.** An internal page a nurse or doctor opens before the appointment: the intake
+  conversation, plus a red banner if `flag_urgent_escalation` fired, plus the urgency level. This is a plain
+  read view — it doesn't call koboi at all, it just reads whatever `flag_urgent_escalation` wrote to the
+  review queue.
 
-from koboi.tools.registry import tool
-from koboi.types import RiskLevel
+The patient chat widget is doc 00 §3's `streamChat` with nothing added beyond rendering the text:
 
-
-@tool(
-    name="flag_urgent_escalation",
-    description=(
-        "Flag the current intake session for urgent clinical review. Use ONLY when the "
-        "patient's answers match a red-flag criterion from the clinical protocol corpus "
-        "(e.g. chest pain + shortness of breath). Does not diagnose, does not contact "
-        "emergency services, and does not write to the EHR -- it only queues the session "
-        "for a human clinician to review immediately."
-    ),
-    parameters={
-        "type": "object",
-        "properties": {
-            "reason": {
-                "type": "string",
-                "description": "The red-flag criterion matched, quoting the protocol text.",
-            },
-            "urgency": {
-                "type": "string",
-                "enum": ["urgent_care_now", "same_day", "routine_flag"],
-            },
-        },
-        "required": ["reason", "urgency"],
-    },
-    risk_level=RiskLevel.SAFE,
-)
-async def flag_urgent_escalation(reason: str, urgency: str, _deps: dict) -> str:
-    """Write a flag row to the clinician review queue. Never touches the EHR."""
-    review_queue = _deps["review_queue"]  # injected dependency, clinic-owned store
-    await review_queue.enqueue(reason=reason, urgency=urgency)
-    return f"Escalation flagged ({urgency}); a clinician will review this session."
+```js
+streamChat(userMessage, (event) => {
+  if (event.type === "text_delta") {
+    bubble.textContent += event.text;
+  } else if (event.type === "complete") {
+    bubble.classList.add("done");
+  }
+});
 ```
 
-Register in `config/agent.yaml` under `tools.custom` (see §4c). No other write-capable tool is registered in
-this sector's config — see §5.
+No custom event handling needed — `flag_urgent_escalation` runs silently in the background; the patient
+never sees a "you've been flagged" message, since that's for the clinician's screen, not theirs.
 
-### 4b. PHI redaction guardrail
+## Docker
 
-Per doc 00 §5, guardrails have no YAML `custom_modules` key — register via the `koboi.guardrails` entry-point
-group in `pyproject.toml`. Subclasses `PatternGuardrail` (regex-driven; override `PATTERNS`/`DEFAULT_ACTION`
-or pass `custom_patterns` — per doc 00's extension-point table) to catch phone numbers, DOB, and insurance IDs
-before they reach logs or the Langfuse trace.
-
-```python
-# src/healthcare_ext/guardrails.py
-"""healthcare_ext/guardrails.py -- redacts PHI from anything that gets logged/traced."""
-
-import re
-
-from koboi.guardrails.base import PatternGuardrail  # exact base per doc 00 extension table
-
-
-class PHIRedactionGuardrail(PatternGuardrail):
-    """Redacts phone numbers, DOB-shaped dates, and insurance IDs.
-
-    NOTE: pattern coverage here is illustrative, not exhaustive -- see open question
-    in Sec. 8 about validating this against a proper PHI de-identification standard
-    (e.g. HIPAA Safe Harbor's 18 identifiers) before production use.
-    """
-
-    PATTERNS = {
-        "phone": re.compile(r"\b(\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b"),
-        "dob": re.compile(r"\b(0[1-9]|1[0-2])[/-](0[1-9]|[12]\d|3[01])[/-](19|20)\d{2}\b"),
-        "insurance_id": re.compile(r"\b[A-Z]{2,4}-?\d{6,10}\b"),
-    }
-    DEFAULT_ACTION = "redact"  # replace match with "[REDACTED:<label>]", not block-the-turn
-
-
-def register(registry) -> None:
-    """Entry-point callable invoked by koboi's GuardrailRegistry."""
-    registry.register("phi_redaction", lambda **cfg: PHIRedactionGuardrail(**cfg))
-```
-
-```toml
-# pyproject.toml (excerpt)
-[project.entry-points."koboi.guardrails"]
-phi_redaction = "healthcare_ext.guardrails:register"
-```
-
-This guardrail is wired as an **output** guardrail (`guardrails.output` in YAML) so it scrubs what's about to
-be persisted/traced. Whether it should *also* run as a `PRE_INPUT` guardrail on the raw patient message (per
-doc 00's `PRE_INPUT` hook event) so PHI never enters the LLM prompt context at all — vs. only scrubbing what
-leaves the system — is a real design decision; see open question in §8.
-
-### 4c. `config/agent.yaml`
+Same shape as doc 00 §6, with the protocol corpus mounted in:
 
 ```yaml
-mode: chat                    # chat only for this deployment; plan allowed for internal
-                               # staff test runs, act/yolo excluded via allowed_modes below
+services:
+  koboi:
+    build: ./backend                    # koboi-agent[api] + healthcare_ext, pip install -e .
+    ports: ["8000:8000"]
+    volumes:
+      - koboi-data:/data                # memory db, keys, sessions -- see PHI note below
+      - ./data/protocols:/app/data/seed:ro   # Riverside's triage documents, read-only
+    env_file: .env
+  web:
+    build: ./frontend                   # patient chat + clinician summary view
+    ports: ["3000:80"]
+    depends_on: [koboi]
+volumes:
+  koboi-data:
+```
+
+The `/data` volume holds conversation history, and for this app that history is patient health information.
+Koboi doesn't encrypt this volume or restrict access to it — that's on Riverside's own IT/ops team, the same
+as it would be for any self-hosted database holding patient data.
+
+## config/agent.yaml
+
+```yaml
+mode: chat                        # never act or yolo -- this is a live conversation with a patient
 
 server:
-  allowed_modes: [chat, plan]  # act/auto/yolo rejected with 400 invalid_mode (doc 00 §1)
+  allowed_modes: [chat]           # anything else is rejected with 400 invalid_mode
 
 rag:
-  retriever: hybrid            # keyword+semantic over the protocol/formulary corpus
-  corpus_path: ./data/seed
+  retriever: hybrid
+  corpus_path: ./data/seed        # Riverside's triage protocol docs, versioned by clinical staff
   top_k: 8
+
+context:
+  strategy: smart_truncation      # always keeps the system prompt + the patient's literal first message
+  keep_last: 20                   # plus the most recent 20 messages -- see "don't lose the first message" above
 
 tools:
   custom:
     - module: healthcare_ext.tools   # registers flag_urgent_escalation only
-  # No filesystem/shell/git/subagent tools enabled -- see Sec. 5.
 
 guardrails:
   output:
-    - phi_redaction            # registered via koboi.guardrails entry point (Sec 4b)
+    - phi_redaction                  # koboi.guardrails entry point, see healthcare_ext/guardrails.py
 
-# --- Decision point: tracing ---
-# Langfuse tracing (doc 00 Sec 6) captures conversation content for observability.
-# Even with the output guardrail scrubbing structured PHI patterns, free-text patient
-# answers ("I've had a headache since my daughter's birthday, March 3rd...") can carry
-# PHI the regex patterns don't catch. Two acceptable postures, pick one explicitly:
-#   (a) tracing disabled entirely (omit `tracing:` block / leave LANGFUSE_* unset --
-#       doc 00 confirms this fails open/no-op) -- safest default for this sector.
-#   (b) tracing enabled but scoped: trace metadata only (latencies, tool calls, token
-#       counts), never `content` fields -- requires verifying koboi's Langfuse
-#       integration supports content-exclusion (see open question, Sec 8).
-# This config ships with tracing OFF (option a) as the default-safe posture.
-# tracing:
-#   provider: langfuse   # <- intentionally left commented out
+# tracing intentionally left out: free-text symptom answers can carry PHI a regex
+# guardrail won't catch, so this deployment ships with tracing off rather than
+# trying to scope it down. Turning it on is a deliberate follow-up decision, not
+# a default.
 ```
 
-## 5. Safety design
+## Why it matters
 
-- **The agent never diagnoses.** This is enforced at the prompt/scope level (system prompt explicitly
-  instructs "ask structured questions, surface protocol-grounded information, never state or imply a
-  diagnosis") — it is not something koboi's tool/guardrail machinery can mechanically guarantee. Treat this as
-  a prompt-engineering and eval-suite responsibility (regression-test the system prompt against
-  diagnosis-seeking phrasing).
-- **The agent never writes to the EHR.** There is no EHR-writing tool in this sector's tool registry, full
-  stop — not a permission gate, an absence. `tools.custom` in §4c registers exactly one tool
-  (`flag_urgent_escalation`), and no builtin `DESTRUCTIVE`-risk tools (`shell`, `filesystem` write, `git`) are
-  enabled. This is deliberate: the safety property here is "the model cannot act," not "the model's actions
-  are approved," because approval workflows (HITL per doc 00 §1) still assume the tool *could* do something
-  consequential if approved. In this sector, the intake agent should have **no path** to anything
-  consequential — everything funnels to a human-owned review queue that koboi itself never writes into
-  downstream systems from.
-- **Structured summary hand-off is data, not action.** The end-of-session summary the clinician sees is
-  produced as response content (or via a narrow, review-queue-only write inside `flag_urgent_escalation` and
-  a parallel end-of-session summary tool if one is added later) — never an API call to an EHR, pharmacy, or
-  scheduling system.
+The chat itself is the easy part — koboi's RAG engine handles grounding the conversation in Riverside's own
+protocol documents with a few lines of config. What took actual thought was deciding what the agent is
+allowed to do, and the answer here is: almost nothing. One tool that can only raise a flag, one guardrail
+that keeps sensitive details out of the logs, and everything else left out on purpose. That's the same
+pattern as every other sector in this repo — start from what's built in, then extend it narrowly for what
+the business actually needs — just with the extension pointed at removing capability instead of adding it.
 
-## 6. Deployment
+## Open questions
 
-Single-node self-host per doc 00 §6 — no changes to the generic deployment shape. One addition specific to
-this sector:
-
-- The `/data` volume (per doc 00 §6: `koboi_memory.db` + WAL files, `keys.json`, per-session sandbox workdirs)
-  will contain **conversation history that is itself PHI** for this deployment — patient symptom descriptions,
-  session transcripts, potentially the un-redacted turn history (redaction per §4b is scoped to the
-  logging/tracing path, not necessarily to what `ConversationMemory`/SQLite persists across turns — see open
-  question in §8). Ops must treat the entire `koboi-data` volume as PHI storage: encryption at rest, restricted
-  access control, and inclusion in the clinic's existing HIPAA technical-safeguards program. **Koboi does not
-  encrypt this volume itself or enforce access control on it — that is entirely the deploying customer's
-  responsibility**, same as any other self-hosted SQLite-backed service.
-- Session TTL / sandbox workdir GC (default 24h per doc 00 §6) should be reviewed against the clinic's PHI
-  retention policy — 24h may be too long or too short depending on the clinic's data retention requirements.
-
-## 7. What this demonstrates
-
-This sector highlights koboi's **RAG pipeline grounding responses in a versioned clinical-protocol corpus**
-(so red-flag detection is document-driven, not model-improvised), a **custom output guardrail built on the
-`PatternGuardrail` extension point** for domain-specific redaction (PHI, here; the same pattern generalizes to
-PII in other regulated sectors), and a **deliberately tool-light design** where the safety guarantee comes
-from what capabilities are *absent* from the tool registry rather than from approval gating on present ones.
-
-## 8. Open questions
-
-- **HIPAA/BAA coverage for the chosen LLM provider.** Doc 00 covers OpenAI/Anthropic/Cloudflare as koboi's
-  supported providers but makes no compliance claims about any of them. Before implementation, the customer
-  must confirm which provider they'll use has a signable BAA and confirm koboi's HTTP client (`client.py`)
-  doesn't log/cache request bodies anywhere that would violate that BAA's terms. Koboi itself provides no
-  HIPAA guarantee — this is entirely a provider-selection and contractual decision for the customer.
-- **Does `ConversationMemory`/SQLite persistence store raw (un-redacted) turn content, or only the
-  guardrail-redacted version?** Doc 00 doesn't specify whether output guardrails run before or after a turn
-  is written to conversation memory (vs. only scrubbing what reaches logs/Langfuse). If raw PHI lands in
-  `koboi_memory.db` regardless of the output guardrail, the "protect the `/data` volume" mitigation in §6
-  becomes load-bearing rather than defense-in-depth — worth confirming against the actual `memory_sqlite.py`
-  write path before committing to a redaction strategy.
-- **Should PHI redaction run at `PRE_INPUT` (before the LLM ever sees raw patient text) in addition to
-  `POST_OUTPUT`/logging-side redaction?** The former protects against the LLM provider itself retaining
-  prompt content; the latter only protects koboi's own logs/traces. These are different threat models and the
-  customer should decide which (or both) they need, informed by the BAA question above.
-- **What does "urgent escalation" actually notify?** `flag_urgent_escalation` (§4a) only enqueues a row to a
-  review queue — it assumes clinical staff are actively polling that queue during clinic hours. For a
-  same-day urgent-care scenario, is passive queue-polling sufficient, or does the clinic need a paging/SMS
-  integration on top (built as a `POST_TOOL_USE` hook watching for this tool per doc 00 §5, out of scope for
-  koboi itself)?
-- **Retention/deletion policy for patient conversations.** Given `/data` holds PHI (§6), what's the clinic's
-  required retention window, and does anything need to actively purge sessions after that window — koboi's
-  session TTL/GC (default 24h, doc 00 §6) is about sandbox workdir cleanup, not a compliance-grade retention
-  control, and shouldn't be assumed to satisfy one.
+- **Does a signed BAA exist for the LLM provider Riverside picks?** Koboi supports OpenAI, Anthropic, and
+  Cloudflare as providers but makes no compliance claims about any of them — this is a provider-selection
+  and contract question for Riverside, not something koboi resolves.
+- **Does conversation memory store the raw, un-redacted patient answers?** The `phi_redaction` guardrail in
+  this design runs on the output/logging path; whether koboi's SQLite-backed memory keeps the original text
+  regardless is worth confirming before treating the guardrail as the only line of defense.
+- **How long should patient conversations be kept?** Doc 00's 24-hour session cleanup is about temporary
+  workdir housekeeping, not a data-retention policy — Riverside needs its own answer for how long intake
+  conversations should exist at all.
+- **Should a red-flag symptom get written out immediately instead of waiting in chat history?**
+  `smart_truncation` only protects the first message, so firing `flag_urgent_escalation` right away is safer
+  than counting on a mid-conversation detail surviving to the end of a long chat.

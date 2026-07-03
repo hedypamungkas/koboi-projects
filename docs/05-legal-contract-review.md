@@ -1,145 +1,55 @@
-# Legal — First-Pass Contract Review & Redlining
+# Legal — First-Pass Contract Review and Redlining
 
-> **Status:** Design one-pager (not yet built) · **Date:** 2026-07-03
-> **Reference:** [`docs/00-consuming-koboi-server.md`](00-consuming-koboi-server.md) — read first for endpoints,
-> auth, chat-vs-job modes, SSE shape, and extension points. This doc only covers what's specific to this sector.
+> Read [`00-consuming-koboi-server.md`](00-consuming-koboi-server.md) first — this doc only covers what's different for legal.
 
-## Business problem
+An AI that reads an incoming contract, flags the clauses that don't match your playbook, and drafts a suggested fix — a lawyer reviews and sends everything, the agent never does.
 
-An in-house legal team reviews a high volume of vendor/customer contracts against a standard clause playbook
-(acceptable/unacceptable clause variants, fallback language) and wants an AI first-pass that flags risky
-clauses, suggests redlines from the playbook, and routes anything novel to a human lawyer. The hard constraint:
-**the agent never sends a redline externally** — it only drafts suggestions inside the session for a lawyer to
-review, edit, and send through the firm's own systems.
+## The scenario
 
-## 1. Context & assumptions
+Kessler & Vance's in-house legal team reviews a steady stream of vendor and customer contracts against a standard playbook: a list of clause types (indemnification, limitation of liability, termination, IP assignment...) with the language that's acceptable, the language that isn't, and a fallback the firm can offer instead. Today every contract gets a full manual read before anyone knows if it's routine or a problem. They want a first pass that reads the contract, compares each clause to the playbook, flags what's risky, and drafts a redline using the approved fallback text — flagging anything it doesn't recognize instead of guessing. The agent never sends, files, or signs anything. It only drafts text inside the session; a lawyer reviews it and sends it through the firm's own systems.
 
-| | |
-|---|---|
-| Customer | In-house legal team or outside counsel doing first-pass review on vendor/customer paper |
-| What's dynamic (per-contract) | The contract text itself — pasted or uploaded per turn/job, never persisted as playbook knowledge |
-| What's static (RAG corpus) | The clause playbook: acceptable/unacceptable variants per clause type (indemnity, limitation of liability, termination, IP assignment, ...) + fallback language for each |
-| Execution mode | **Both**, and this is a deliberate recommendation (see below) |
-| `mode` | `chat` for interactive review, `act` for batch first-pass jobs — `plan`/`auto`/`yolo` add no value here and are excluded from `allowed_modes` |
-| Session lifetime | Chat: one session per contract, spans the lawyer's whole review sitting. Jobs: one job per contract in the incoming queue, no session persists after |
+## What you get for free
 
-**Why both chat and jobs, not just one** — same dual-mode reasoning as the finance sector doc
-(`03-finance-invoice-reconciliation.md`) applied to reconciliation:
+The clause playbook — a bounded list of clause types, each with acceptable variants, unacceptable variants, and fallback language — isn't prose to search. It's closer to a set of instructions the agent should follow when it recognizes a situation, which is exactly what koboi's Skills system is for: a folder of Markdown files, one per clause type, that koboi surfaces to the model automatically based on what's being discussed. No retriever, no chunking, no embeddings — the entire playbook is content, not code. Both ways of running a turn from doc 00 work as-is: a lawyer can chat with the agent about one contract, and the same config can run as an unattended job against a queue of incoming contracts.
 
-- **Batch triage** (`POST /v1/jobs`) — an incoming-contracts queue (CLM system or shared inbox) gets a
-  first-pass job per document overnight: flag clauses that deviate from the playbook, attach a risk summary,
-  land it in the lawyer's queue before they open the doc. No human is present, so per doc 00 §1 (jobs have no
-  HITL support) nothing here writes or sends anything — `propose_redline` only drafts into the job's own output.
-- **Interactive drafting** (`POST /v1/chat/stream`) — once a lawyer opens a flagged contract, they work through
-  it clause-by-clause: "what's wrong with clause 8.2", "give me the fallback for this indemnity language."
-  Real-time back-and-forth, not a one-shot report.
+## What you build
 
-Both modes hit the same `propose_redline` tool and the same clause-playbook retriever; only the entry point and
-presence of a human differ.
+One piece isn't code at all — a folder of skill files. The other is two small Python tools, wired up from your own package with no changes to koboi itself.
 
-## 2. Architecture
+**A skills package for the clause playbook** — one folder per clause type, each holding a `SKILL.md` with the acceptable variants, the unacceptable ones, and the fallback text to offer instead:
 
 ```
-                    ┌────────────────────┐        ┌──────────────────────┐
-                    │  Lawyer (chat UI)   │        │ Incoming-contracts    │
-                    │  pastes/uploads     │        │ queue / CLM webhook    │
-                    │  contract text      │        │ (batch, no human)      │
-                    └─────────┬──────────┘        └──────────┬────────────┘
-                              │ POST /v1/chat/stream           │ POST /v1/jobs
-                              ▼                                ▼
-                       ┌────────────────────────────────────────────┐
-                       │            koboi server (1 node)             │
-                       │            config/agent.yaml                 │
-                       └───────────────────┬──────────────────────────┘
-                                            │
-                 ┌──────────────────────────┼──────────────────────────┐
-                 ▼                          ▼                          ▼
-      ┌────────────────────┐   ┌─────────────────────┐    ┌────────────────────────┐
-      │ clause_playbook      │   │ PolicyEngine          │    │ legal_ext.tools         │
-      │ retriever (custom or │   │ (policy.rules[] +     │    │  - propose_redline      │
-      │ koboi builtin RAG —  │──▶│  hardcoded safety)     │───▶│    (RiskLevel.MODERATE) │
-      │ open Q, see §8)       │   │ runs PRE_TOOL_USE      │    │  - flag_novel_clause    │
-      └────────────────────┘   │ priority 25            │    │    (RiskLevel.SAFE)     │
-                                 └──────────┬─────────────┘    └───────────┬────────────┘
-                                            │ deny → abort,                │
-                                            │ confirm → flagged            │
-                                            │ in metadata                  ▼
-                                            │                    Draft redline / risk
-                                            │                    summary returned in the
-                                            │                    turn or job output —
-                                            │                    NOTHING sent externally
-                                            ▼
-                                 Human lawyer reviews and
-                                 finalizes outside koboi
-                                 (their own doc/email tooling)
+playbook_skills/
+  indemnification/SKILL.md
+  limitation_of_liability/SKILL.md
+  termination/SKILL.md
+  ip_assignment/SKILL.md
+  confidentiality/SKILL.md
 ```
 
-- The clause-playbook retriever surfaces the relevant playbook entries (acceptable variants + fallback
-  language) for whatever clause the lawyer/job is looking at — same RAG augmentation flow doc 00 describes.
-- `PolicyEngine` (see §5) runs before *every* tool call, including `propose_redline`. A hard-block rule can
-  force certain clause categories to `deny` (with `ctx.inject_message` telling the agent it must escalate
-  instead of drafting) rather than ever reaching the drafting step.
-- `propose_redline` only ever returns text into the current turn/job output. There is no send-email,
-  CLM-write, or e-signature tool in this design — nothing DESTRUCTIVE exists in this sector's tool surface.
+Each `SKILL.md` is just YAML frontmatter (only `name` and `description` are required) plus a Markdown body:
 
-## 3. Project structure
+```markdown
+---
+name: indemnification-clauses
+description: Acceptable and unacceptable indemnification clause variants, with fallback language
+disable-model-invocation: false
+---
+# Indemnification Clauses
 
-```
-legal-contract-review/
-├── pyproject.toml
-├── config/
-│   └── agent.yaml
-├── src/
-│   └── legal_ext/
-│       ├── __init__.py
-│       ├── rag/
-│       │   ├── __init__.py
-│       │   └── clause_retriever.py   # @register_retriever("clause_playbook")
-│       └── tools.py                   # propose_redline, flag_novel_clause
-├── data/
-│   └── seed/                          # clause_playbook.jsonl or one .md per clause type
-├── Dockerfile
-└── tests/
-    └── test_tools.py
+## Acceptable variants
+- Mutual indemnification, capped at total fees paid under the contract
+
+## Unacceptable variants (escalate, do not draft a redline)
+- Uncapped or one-sided indemnification
+
+## Fallback language
+"Each party indemnifies the other for third-party claims from its own breach or negligence, capped at fees paid in the preceding twelve months."
 ```
 
-`pyproject.toml` declares `koboi-agent[api] @ git+https://.../koboi-agent.git` and installs `legal_ext` as an
-editable package, exactly per doc 00 §5/§6.
+`limitation_of_liability/SKILL.md`, `termination/SKILL.md`, and the rest follow the same shape — swap in that clause type's own variants and fallback text. Every turn, koboi lists these skills (name + description) to the model and ranks them against what the lawyer or job is currently looking at; when the model decides one is relevant, koboi injects that skill's full body into context for that turn.
 
-## 4. Key code skeletons
-
-### (a) Custom retriever over the clause playbook
-
-Mirrors doc 00 §5's constructor-introspection contract — YAML keys under `rag:` match `__init__` params by name.
-
-```python
-# src/legal_ext/rag/clause_retriever.py
-from koboi.rag.registry import register_retriever
-from koboi.rag.retriever import BaseRetriever
-from koboi.rag.types import RetrievalResult
-
-
-@register_retriever("clause_playbook", description="Structured clause library: variants + fallback language")
-class ClausePlaybookRetriever(BaseRetriever):
-    def __init__(self, playbook_path: str, clause_taxonomy: list[str] | None = None):
-        # playbook_path: firm's structured clause library (JSON/YAML/DB-backed — see open question in §8
-        # on whether this stays file-based or moves to a dedicated vector store)
-        self._playbook_path = playbook_path
-        self._taxonomy = clause_taxonomy or []
-        self._entries = self._load(playbook_path)
-
-    def _load(self, path: str) -> list[dict]:
-        # parse the clause library into {clause_type, acceptable_variants, unacceptable_variants, fallback}
-        ...
-
-    async def retrieve(self, query: str, top_k: int = 3) -> list[RetrievalResult]:
-        # match the contract clause text (query) against clause_type entries — keyword match on the
-        # taxonomy is likely sufficient given a bounded clause vocabulary; swap for embedding similarity
-        # if the playbook grows past what keyword matching handles well
-        ...
-```
-
-### (b) `propose_redline` tool — drafts only, sends nothing
+**Two tools** — one drafts, one escalates:
 
 ```python
 # src/legal_ext/tools.py
@@ -148,34 +58,27 @@ from koboi.types import RiskLevel
 
 @tool(
     name="propose_redline",
-    description=(
-        "Draft a suggested redline for a contract clause, using the firm's clause playbook fallback "
-        "language. Returns draft text only — never sends or applies anything externally."
-    ),
+    description="Draft a suggested redline using the playbook's fallback language. Returns text only.",
     parameters={
         "type": "object",
         "properties": {
-            "clause_type": {"type": "string", "description": "e.g. indemnification, limitation_of_liability"},
-            "original_text": {"type": "string", "description": "The clause as written in the contract"},
-            "playbook_fallback": {"type": "string", "description": "Fallback language retrieved from the playbook"},
+            "clause_type": {"type": "string"},
+            "original_text": {"type": "string"},
+            "playbook_fallback": {"type": "string"},
         },
         "required": ["clause_type", "original_text"],
     },
     risk_level=RiskLevel.MODERATE,
 )
 async def propose_redline(clause_type: str, original_text: str, playbook_fallback: str = "") -> str:
-    # returns a draft comparison + suggested redline as text; does not write to any external system
-    ...
+    ...  # returns draft comparison text only — never writes or sends anywhere
 
 @tool(
     name="flag_novel_clause",
-    description="Flag a clause that has no playbook match for human review — does not attempt to redline it.",
+    description="Flag a clause with no playbook match, for a lawyer to look at directly.",
     parameters={
         "type": "object",
-        "properties": {
-            "clause_text": {"type": "string"},
-            "reason": {"type": "string", "description": "Why this doesn't match a known playbook pattern"},
-        },
+        "properties": {"clause_text": {"type": "string"}, "reason": {"type": "string"}},
         "required": ["clause_text", "reason"],
     },
     risk_level=RiskLevel.SAFE,
@@ -184,7 +87,76 @@ async def flag_novel_clause(clause_text: str, reason: str) -> str:
     ...
 ```
 
-### (c) `config/agent.yaml` (relevant excerpts)
+Neither tool is `DESTRUCTIVE` — there's nothing to approve mid-run because nothing leaves the session. The real approval step is a lawyer reading the draft before using it.
+
+## Architecture
+
+Two ways into the same koboi deployment, same skills, same tools:
+
+```
+  Lawyer's browser                     Incoming-contracts queue
+  (chat, one contract                  (CLM inbox, batch,
+   at a time)                           no human present)
+        │  POST /v1/chat/stream               │  POST /v1/jobs
+        ▼                                      ▼
+  ┌───────────────────────────────────────────────────┐
+  │                  koboi server (Docker)              │
+  │                  config/agent.yaml                  │
+  │   skill routing (playbook_skills) ──▶ propose_redline │
+  │                                    ──▶ flag_novel_clause │
+  └───────────────────────────────────────────────────┘
+        │                                      │
+        ▼                                      ▼
+  Draft redline / flag shown            Risk summary lands in the
+  inline in the chat, lawyer            lawyer's queue overnight,
+  keeps talking through it              before they open the doc
+```
+
+Overnight, the queue runs a job per incoming contract: flag risky clauses, draft redlines, land a summary in the lawyer's queue before they open the document. During the day, a lawyer opens a flagged contract and works through it clause by clause in chat — "what's wrong with 8.2," "give me the fallback for this indemnity language." Same skills, same tools, same config; only the entry point and whether a human is watching differ.
+
+## The frontend
+
+A lawyer's workspace, not a chat window bolted onto a document viewer: paste or upload a contract on the left, see it side by side with the AI's flags and suggested redlines on the right, and a chat panel below for asking about any specific clause. Flagged clauses are highlighted inline; clicking one drops its text into the chat panel so the lawyer can ask follow-ups without retyping.
+
+The clause-chat panel is doc 00 §3's `streamChat` with a couple of UI hooks added:
+
+```js
+function askAboutClause(clauseText) {
+  appendUserBubble(`About this clause: "${clauseText}"`);
+  streamChat(`Review this clause against the playbook: ${clauseText}`, (event) => {
+    if (event.type === "text_delta") appendToBubble(event.delta);
+    if (event.type === "tool_call" && event.name === "flag_novel_clause") {
+      showBanner("No playbook match — flagged for review");
+    }
+    if (event.type === "complete") enableRedlineActions();
+  });
+}
+```
+
+## Docker
+
+Same one-container pattern as doc 00 §6, with the skills folder mounted as a read-only seed volume:
+
+```yaml
+services:
+  koboi:
+    build: ./backend
+    ports: ["8000:8000"]
+    volumes:
+      - koboi-data:/data
+      - ./playbook_skills:/app/playbook_skills:ro   # clause playbook, read-only
+    env_file: .env
+  web:
+    build: ./frontend
+    ports: ["3000:80"]
+    depends_on: [koboi]
+volumes:
+  koboi-data:
+```
+
+The playbook is a set of Markdown files the firm edits when clause language changes — adding a clause category or updating fallback text is a file change, not a deploy.
+
+## config/agent.yaml
 
 ```yaml
 tools:
@@ -192,22 +164,9 @@ tools:
   custom:
     - module: legal_ext.tools
 
-rag:
-  retriever: clause_playbook
-  custom_modules:
-    - legal_ext.rag.clause_retriever
-  playbook_path: data/seed/clause_playbook.jsonl
-  clause_taxonomy: [indemnification, limitation_of_liability, termination, ip_assignment, confidentiality]
-  top_k: 5
-
-policy:
-  rules:
-    - tool: propose_redline
-      pattern: "uncapped liability"
-      action: deny
-    - tool: propose_redline
-      pattern: "unlimited indemnification"
-      action: deny
+skills:
+  search_paths: ["./playbook_skills"]
+  budget_chars: 8000
 
 server:
   auth_required: true
@@ -216,81 +175,15 @@ server:
     max_iterations_cap: 15
 ```
 
-`tools.custom` and `rag.retriever`/`rag.custom_modules` follow doc 00 §5's registration contract exactly — no
-koboi core code is touched. The `policy.rules` block is real, code-verified `koboi` config (`PolicyRuleConfig`
-in `config_models.py`, consumed by `PolicyEngine` at `PRE_TOOL_USE`, priority 25) — **but see the important
-caveat in §5 before relying on the `pattern` field for clause text.**
+`chat` covers interactive review; `act` covers the overnight batch job. `plan`, `auto`, and `yolo` add nothing here, so they're left out of `allowed_modes`. Escalation needs no extra config either: `flag_novel_clause` covers a clause with no playbook match at all, and each skill's own "escalate, do not draft" section covers a clause that matches a known type but shouldn't get an automatic redline.
 
-## 5. Escalation design
+## Why it matters
 
-Two independent layers combine so nothing legally binding is ever auto-generated without a lawyer's eyes:
+The built-in path — chat, jobs, streaming, memory — needed no changes to handle a completely different kind of lookup: a structured playbook instead of prose documents. The only Python is two small tools; the entire clause playbook is Markdown, and koboi's own skill routing figures out which clause type applies. The safety property that matters most here — nothing ever leaves the session without a lawyer seeing it first — falls out of picking the right risk level for the tools, not from writing extra plumbing. Same codebase, same server, a different business on top.
 
-1. **`policy.rules` hard blocks (upstream, pattern-based, non-negotiable).** koboi's `PolicyEngine` runs at
-   `PRE_TOOL_USE` (priority 25, before the tool executes), evaluating every call against configured rules
-   first-match-wins, *in addition to* koboi's hardcoded sensitive-path/command-deny checks that always run
-   first and can't be overridden. A `deny` action sets `ctx.abort = True` — the tool never runs, and
-   `ctx.inject_message` tells the agent why, so it must escalate to the lawyer instead of drafting anything.
-2. **`RiskLevel.MODERATE` on `propose_redline` (downstream, per-call).** Even for clauses that pass the policy
-   layer, `propose_redline` only ever *drafts* — no side effect on any external system. `MODERATE` sits below
-   koboi's `DESTRUCTIVE` approval-gate threshold (doc 00 §5), which is correct here: there's nothing to approve
-   because nothing is being sent or applied. The real "approval" step is the lawyer reading the drafted redline
-   before using it — human-in-the-loop by workflow, not a koboi `pending_approval` handshake.
+## Open questions
 
-**Contrast with finance:** `03-finance-invoice-reconciliation.md` uses `RiskLevel.DESTRUCTIVE` + a
-maker-checker `ApprovalHandler` because its tool *writes to a system of record* (posts a journal entry). Legal
-never writes or sends anything externally, so there's no write-side action to gate — the risk is entirely in
-*content*, which is why the gate sits upstream in retrieval/policy rather than on an approval step downstream
-of a write.
-
-**Caveat on `policy.rules`, verified against `koboi/facade.py::_build_policy`:** the YAML→engine wiring always
-maps a rule's `pattern` to an argument literally named `command` (`argument_patterns={"command": pattern}`),
-and `PolicyEngine._match_rule` requires that literal substring to appear in the tool's serialized arguments
-before it attempts a match — built with shell-command denial in mind (`run_shell`, `git_*`). `propose_redline`'s
-arguments (`clause_type`/`original_text`/`playbook_fallback`) have no `command` key, so a rule as sketched in
-§4(c) **will not match** unless the pattern also appears as a raw substring in the serialized argument blob
-(the code's fallback path). Doc 00 doesn't cover this field-level semantic — see the open question below rather
-than assuming it "just works."
-
-## 6. Deployment
-
-Single self-hosted node, per doc 00 §6: `pip install "koboi-agent[api] @ git+..."`, `koboi serve
-config/agent.yaml --host 0.0.0.0 --port 8000`, `/data` volume for `koboi_memory.db*` + `keys.json` + session
-workdirs. No sector-specific deployment wrinkles.
-
-## 7. What this demonstrates
-
-This sector is the clearest illustration of koboi's **custom retriever over a structured (non-document)
-knowledge base** — the clause playbook isn't prose to chunk, it's a taxonomy of variants and fallback language,
-which is exactly what the constructor-introspection registration pattern (doc 00 §5) is designed to make easy
-to swap in. It also exercises the `policy.rules` engine as a content-level hard-block distinct from koboi's
-risk-level/approval machinery, and shows the dual chat+job pattern applied to a workflow where batch triage and
-interactive drafting are both genuinely necessary, not just "nice to support."
-
-## 8. Open questions
-
-- **Playbook storage: file-based RAG vs. dedicated vector DB?** Doc 00 doesn't prescribe a default vector store
-  and koboi's built-in RAG is file-corpus-oriented. A bounded, well-structured clause taxonomy (dozens of
-  clause types, each with a handful of variants) may not need embeddings at all — keyword/taxonomy matching in
-  the custom retriever sketched in §4(a) might suffice. Needs a decision once the real playbook size and update
-  cadence (how often does legal add fallback language?) are known.
-- **`policy.rules` pattern-matching precision.** Per the §5 caveat, the current YAML wiring only reliably
-  matches an argument named `command`. Before relying on `policy.rules` for clause-text hard blocks, this needs
-  either (a) a workaround — e.g. having `propose_redline` also accept/log its input under a `command`-named
-  field purely so the pattern check fires, which is hacky — or (b) constructing `PolicyEngine`/`PolicyRule`
-  objects programmatically (bypassing YAML) inside `legal_ext`, or (c) a small upstream change to koboi's
-  `_build_policy` to take an argument-name field. This is a real gap, not something doc 00 resolves.
-  **Do not build the hard-block feature on the YAML `policy.rules` path as sketched in §4(c) without resolving
-  this first.**
-- **Novel-clause escalation UX.** `flag_novel_clause` writes a flag into the current turn/job output — but who
-  actually gets notified for chat-mode escalations vs. batch-job flags? Doc 00 has no notification/webhook
-  primitive (jobs are pull-only per §7); does the firm's CLM or ticketing system need to poll job output, or is
-  a custom `POST_TOOL_USE` hook (doc 00 §5) needed to push a notification elsewhere?
-- **Confidentiality of contract text in `koboi_memory.db`.** Contract text and playbook comparisons will sit in
-  SQLite-backed session memory (doc 00 §6) for the session's lifetime. Does the firm need encryption-at-rest
-  beyond what the `/data` volume provides, or a stricter session TTL/purge policy than the default sandbox
-  workdir GC (24h)?
-- **Fallback-language authority.** If `propose_redline` suggests fallback language and the lawyer accepts it
-  verbatim, is that treated as pre-approved by whoever owns the playbook, or does every redline — regardless of
-  how closely it matches an existing fallback — need a second sign-off? This is a firm policy decision, not a
-  technical one, but it affects whether any future write-side tool (e.g. pushing an accepted redline back into
-  a CLM system) would need `DESTRUCTIVE` + approval like finance's pattern, or could stay `MODERATE`.
+- **Playbook size and `budget_chars`.** A few dozen short clause skills comfortably fit under the discovery list and the 8,000-character per-activation budget. If the playbook grows much larger, or fallback language gets long, `budget_chars` may need raising, or the largest clause types may need splitting into narrower skills.
+- **Where novel-clause flags go.** `flag_novel_clause` puts a flag in the current turn or job output, but doc 00 has no notification or webhook mechanism — jobs are pulled, not pushed. Does the firm's queue system poll for flags, or does this need a small custom hook to push a notification somewhere?
+- **How long contract text should stay in session memory.** Contract text sits in koboi's session storage for the life of the session. Does legal need a shorter retention window or encryption beyond what the `/data` volume already provides?
+- **`allowed-tools`/`disallowed-tools` aren't enforced.** A skill's frontmatter can list these fields, but koboi doesn't currently check them anywhere in the tool-calling pipeline — they document intent to the model, they don't restrict what a skill can actually trigger, so they're not a substitute for keeping `propose_redline` at `MODERATE`.
