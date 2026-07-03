@@ -1,0 +1,75 @@
+# Riverside Family Clinic -- pre-visit patient intake.
+#
+# Field names verified directly against koboi/config_models.py (not copied
+# blindly from docs/04) -- see README "Deviations from the spec docs" for the
+# specific corrections made here.
+
+agent:
+  name: "patient-intake"
+  # NOT "chat" -- verified live (see README "Deviations from the spec docs" #0):
+  # koboi/hooks/mode_hook.py hardcodes a read-only tool allowlist for CHAT/PLAN
+  # mode, and flag_urgent_escalation (a custom tool) isn't on it, so CHAT mode
+  # silently mode-blocks the escalation call regardless of its SAFE risk level.
+  # ACT mode allows all tools, and because this tool is SAFE, koboi's
+  # AsyncCallbackApprovalHandler auto-approves it with no human-in-the-loop
+  # pause -- so the patient-facing behavior is identical to what "chat mode"
+  # was meant to convey: a live conversation, no approval UI.
+  mode: act
+  system_prompt: |
+    You conduct a pre-visit patient intake conversation for Riverside Family Clinic. Ask about
+    symptoms, duration, severity, and relevant history, following the clinic's own intake
+    questions. You do NOT diagnose, and you do NOT recommend treatments or medications.
+
+    If the patient's answers match a red-flag combination described in the clinic's own
+    protocol documents, call flag_urgent_escalation with a short reason, and tell the patient to
+    seek immediate or emergency care. For routine, non-urgent symptoms, do not call the tool --
+    just continue the intake and let the patient know the care team will review their answers
+    before the visit.
+
+llm:
+  provider: "openai"
+  model: "${OPENAI_MODEL}"
+  api_key: "${OPENAI_API_KEY}"
+  base_url: "${OPENAI_BASE_URL:}"
+
+tools:
+  custom:
+    - module: healthcare_ext.tools
+
+rag:
+  enabled: true
+  documents:
+    - path: "/app/data/seed/red_flag_symptoms.md"
+    - path: "/app/data/seed/intake_questions.md"
+
+guardrails:
+  output:
+    # "name" selects the registered guardrail (see healthcare_ext/guardrails.py).
+    # GuardrailsConfig.output is a single dict-shaped slot (verified against
+    # config_models.py -- a list there fails pydantic validation), so
+    # detect_sensitive is passed through to PHIRedactionGuardrail, which folds
+    # in the built-in secret-leak patterns when this flag is true. One
+    # guardrail instance covers both "secrets" and "PHI".
+    name: phi_redaction
+    detect_sensitive: true
+
+context:
+  strategy: smart_truncation
+  keep_last: 20
+
+server:
+  auth_required: false   # simplified for this local smoke-test POC -- would be true in production
+  # "act", matching agent.mode above -- "chat" is deliberately not offered as a
+  # per-request override here since it would silently mode-block
+  # flag_urgent_escalation (see the comment on agent.mode).
+  allowed_modes: [act]
+  cors:
+    # Required for the browser-based frontend (served on a different port) to
+    # call this API directly; koboi only adds CORS middleware when this block
+    # is explicitly present (see koboi/server/app.py).
+    allow_origins: ["http://localhost:3004"]
+    # Without this, the browser's CORS policy hides all response headers from
+    # JS except a small "safe" allowlist -- X-Session-Id (how the frontend
+    # keeps a multi-turn conversation in one session) would silently read as
+    # null on every cross-origin request without being explicitly exposed.
+    expose_headers: ["X-Session-Id"]
