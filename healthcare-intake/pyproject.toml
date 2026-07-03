@@ -1,0 +1,21 @@
+[project]
+name = "healthcare-intake"
+version = "0.1.0"
+description = "Riverside Family Clinic pre-visit patient intake -- koboi-agent business extension"
+requires-python = ">=3.10"
+dependencies = [
+    "koboi-agent>=0.2.0",
+]
+
+# Discovered by koboi.plugins.discover_plugins() at `import koboi` time, once this
+# package is installed (see healthcare_ext/guardrails.py + README "Guardrail
+# registration" section for why we also register directly as a fallback).
+[project.entry-points."koboi.guardrails"]
+phi_redaction = "healthcare_ext.guardrails:register"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
