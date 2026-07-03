@@ -15,14 +15,14 @@ write, and the Docker setup. Read this first; the sector docs only cover what's 
 
 ## The six use cases
 
-| # | Business | What the app does | Out of the box | Custom |
-|---|---|---|---|---|
-| 1 | [E-commerce support](docs/01-ecommerce-retail-support.md) | Storefront chat answers order/return questions, processes simple refunds | RAG, chat, prompt-injection guard + rate limit (2 YAML lines) | Order lookup, refund tool with human approval |
-| 2 | [HR screening](docs/02-hr-recruiting-screening.md) | Screens resumes overnight into a ranked shortlist for recruiters | Background jobs | ATS lookup, scoring, audit-trail hook |
-| 3 | [Finance reconciliation](docs/03-finance-invoice-reconciliation.md) | Matches invoices to POs overnight; controller approves postings each morning | Jobs + chat, MCP client (connects to the company's own ERP server) | Ledger-posting tool kept local so it stays approval-gated |
-| 4 | [Healthcare intake](docs/04-healthcare-patient-intake.md) | Pre-visit chat checks symptoms against clinical protocols, flags urgent cases | RAG, chat, secret-redacting output filter | PHI-redaction guardrail, escalation flag, context strategy that protects the first message |
-| 5 | [Legal contract review](docs/05-legal-contract-review.md) | First-pass redlining against a firm's clause playbook | Jobs + chat, Skills (playbook is Markdown, no retriever code) | Draft-only redline tool, novel-clause flag |
-| 6 | [Real estate](docs/06-real-estate-property-management.md) | Buyer chat on listings + nightly draft descriptions and lead follow-ups | Jobs + chat, `delegate_tasks` fan-out for batch drafting | Property lookup, drafting tools |
+| # | Business | What the app does | Out of the box | Custom | Run it |
+|---|---|---|---|---|---|
+| 1 | E-commerce support | Storefront chat answers order/return questions, processes simple refunds | RAG, chat, prompt-injection guard + rate limit (2 YAML lines) | Order lookup, refund tool with human approval | [`ecommerce-support/`](ecommerce-support/) · [design doc](docs/01-ecommerce-retail-support.md) |
+| 2 | HR screening | Screens resumes overnight into a ranked shortlist for recruiters | Background jobs | ATS lookup, scoring, audit-trail hook | [`hr-screening/`](hr-screening/) · [design doc](docs/02-hr-recruiting-screening.md) |
+| 3 | Finance reconciliation | Matches invoices to POs overnight; controller approves postings each morning | Jobs + chat, MCP client (connects to the company's own ERP server) | Ledger-posting tool kept local so it stays approval-gated | [`finance-reconciliation/`](finance-reconciliation/) · [design doc](docs/03-finance-invoice-reconciliation.md) |
+| 4 | Healthcare intake | Pre-visit chat checks symptoms against clinical protocols, flags urgent cases | RAG, chat, secret-redacting output filter | PHI-redaction guardrail, escalation flag, context strategy that protects the first message | [`healthcare-intake/`](healthcare-intake/) · [design doc](docs/04-healthcare-patient-intake.md) |
+| 5 | Legal contract review | First-pass redlining against a firm's clause playbook | Jobs + chat, Skills (playbook is Markdown, no retriever code) | Draft-only redline tool, novel-clause flag | [`legal-contract-review/`](legal-contract-review/) · [design doc](docs/05-legal-contract-review.md) |
+| 6 | Real estate | Buyer chat on listings + nightly draft descriptions and lead follow-ups | Jobs + chat, `delegate_tasks` fan-out for batch drafting | Property lookup, drafting tools | [`real-estate/`](real-estate/) · [design doc](docs/06-real-estate-property-management.md) |
 
 Every app follows the same shape: a web UI, one koboi container, and a small Python package with the
 business-specific tools. No two lean on the same koboi capability the same way — RAG, guardrails, MCP,
@@ -30,5 +30,15 @@ Skills, and parallel task fan-out each show up where they're the natural fit, no
 
 ## Status
 
-These are design specs — architecture, `config.yaml`, code skeletons, Docker setup, frontend sketch — not
-yet built. Each doc ends with the open questions worth settling before writing real code.
+**All six are built and running.** Each project directory has its own `docker-compose.yml`, `README.md` with
+exact run/smoke-test steps, and a "Deviations" section documenting where the real `koboi-agent` behavior
+differed from the design doc's sketch (a handful of real gaps only surfaced by actually running the code —
+see each README, or `vendor/` for the pinned `koboi-agent` wheel every project installs from).
+
+Quick start for any one of them:
+```bash
+cd <project-dir>   # e.g. ecommerce-support
+docker compose build
+docker compose up -d
+# see that project's README for the exact smoke-test curl commands and expected output
+```
