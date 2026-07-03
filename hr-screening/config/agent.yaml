@@ -1,0 +1,70 @@
+# hr-screening agent config -- runs as jobs (POST /v1/jobs), not chat.
+# Field names verified against the installed koboi-agent==0.2.0
+# koboi/config_models.py (AgentConfig, LLMConfig, ToolsConfig, JobsConfig,
+# ServerConfig, MemoryConfig).
+
+agent:
+  name: "hr-resume-screening"
+  mode: act # jobs reject yolo unconditionally regardless of this setting (doc 00 SS2)
+  system_prompt: |
+    You screen resumes against job requirements for Northstar Talent's talent
+    acquisition team. You do not reject or advance candidates -- a human
+    recruiter makes that call. You only recommend.
+
+    Requisition: Senior Backend Engineer
+    Requirements: 5+ years backend engineering experience, strong Python
+    proficiency, distributed-systems experience (message queues, databases at
+    scale), and evidence of technical leadership or mentoring.
+
+    Steps:
+    1. Call fetch_resume with the given resume_id to read the candidate's
+       resume.
+    2. Call score_candidate exactly once with a numeric 0-100 fit score, a
+       rationale citing specific criteria from the requisition above, and a
+       recommendation (strong_match, possible_match, or weak_match).
+    3. After the tool call, reply with ONLY a single JSON object (no
+       markdown fences, no extra prose) with exactly these keys: resume_id,
+       score, rationale, recommendation. This is machine-parsed by the
+       recruiter dashboard.
+
+llm:
+  provider: "openai"
+  model: "${OPENAI_MODEL}"
+  api_key: "${OPENAI_API_KEY}"
+  base_url: "${OPENAI_BASE_URL:}"
+
+tools:
+  custom:
+    - module: hr_ext.tools
+
+# Sidecar DB (jobs/ownership) shares the sqlite memory backend's file; pointing
+# it at the mounted volume lets `jobs.resume_on_startup` survive a container
+# restart instead of resetting to :memory:.
+memory:
+  backend: sqlite
+  db_path: /data/koboi_memory.db
+
+# koboi/server/jobs.py refuses to run an autonomous job on the default
+# `passthrough` sandbox (`PermissionError: Autonomous jobs require
+# sandbox.backend='restricted'`) -- discovered by actually submitting a job
+# against this config, not documented in docs/02's snippet. `fetch_resume` /
+# `score_candidate` are plain Python (no subprocess/shell), so restricted
+# containment doesn't change their behavior; it's required purely to satisfy
+# the jobs runner's safety gate for unattended runs.
+sandbox:
+  backend: restricted
+
+jobs:
+  enabled: true
+  max_concurrent: 5
+
+server:
+  auth_required: false # simplified for this local smoke-test POC -- would be `true` (with real API keys) in production
+  allowed_modes: [act]
+  # koboi/server/app.py only registers CORSMiddleware when `server.cors` is a
+  # non-empty dict (never a wildcard default -- C4); without this, the
+  # dashboard (localhost:3002) can't fetch the API (localhost:8002) at all
+  # (blocked by the browser, no CORS headers present). "*" is fine for this
+  # local demo; scope it to the real dashboard origin in production.
+  cors:
+    allow_origins: ["*"]
