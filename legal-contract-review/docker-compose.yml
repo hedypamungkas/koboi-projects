@@ -1,0 +1,14 @@
+services:
+  koboi:
+    build:
+      context: ..
+      dockerfile: legal-contract-review/backend/Dockerfile
+    ports: ["8005:8000"]
+    volumes: ["koboi-data:/data"]
+    env_file: ["/Users/mekari/Documents/Research-POC/ai-agent-sample/koboi-agent/.env"]
+  web:
+    build: ./frontend
+    ports: ["3005:80"]
+    depends_on: [koboi]
+volumes:
+  koboi-data:

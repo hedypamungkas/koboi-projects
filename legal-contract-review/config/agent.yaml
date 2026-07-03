@@ -1,0 +1,48 @@
+agent:
+  name: "contract-review"
+  description: "Kessler & Vance first-pass contract review and redlining assistant"
+  system_prompt: |
+    You review contract clauses against the firm's playbook (surfaced to you as skills). For a
+    clause matching a known playbook category, either call the propose_redline tool with the
+    fallback language (if the clause is an unacceptable variant -- do not just write the redline
+    yourself, call the tool) or say it's fine (if acceptable). For anything with no playbook
+    match, call flag_novel_clause instead of guessing. You never send, file, or sign anything --
+    you only draft text inside this session for a lawyer to review.
+  max_iterations: 8
+  mode: chat
+
+llm:
+  provider: "openai"
+  model: "${OPENAI_MODEL}"
+  api_key: "${OPENAI_API_KEY}"
+  base_url: "${OPENAI_BASE_URL:}"
+
+tools:
+  builtin:
+    - memory_store
+    - memory_recall
+  custom:
+    - module: legal_ext.tools
+
+memory:
+  backend: sqlite
+  db_path: /data/koboi_memory.db
+
+skills:
+  search_paths: ["/app/playbook_skills"]
+  budget_chars: 8000
+
+server:
+  enabled: true
+  host: "0.0.0.0"
+  port: 8000
+  auth_required: false   # simplified for this local smoke-test POC -- see README (would be true in production)
+  cors:
+    allow_origins: ["*"]
+    expose_headers: ["X-Session-Id"]   # browsers hide response headers cross-origin unless listed
+  allowed_modes: [chat, act]
+  limits:
+    max_iterations_cap: 15
+
+jobs:
+  enabled: true
