@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Northstar Talent -- Resume Screening</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { color-scheme: light dark; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      max-width: 960px;
+      margin: 2rem auto;
+      padding: 0 1rem;
+      color: #1a1a1a;
+      background: #fafafa;
+    }
+    h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
+    p.sub { color: #666; margin-top: 0; }
+    .panel {
+      background: #fff;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      margin-bottom: 1.5rem;
+    }
+    .row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+    input[type="text"] {
+      padding: 0.4rem 0.6rem;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      min-width: 12rem;
+    }
+    button {
+      padding: 0.4rem 0.9rem;
+      border: 1px solid #333;
+      border-radius: 4px;
+      background: #1a1a1a;
+      color: #fff;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    button.secondary { background: #fff; color: #1a1a1a; }
+    button:disabled { opacity: 0.5; cursor: default; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    th, td { text-align: left; padding: 0.5rem 0.6rem; border-bottom: 1px solid #eee; vertical-align: top; }
+    th { color: #555; font-weight: 600; }
+    .badge {
+      display: inline-block;
+      padding: 0.1rem 0.5rem;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .strong_match { background: #e3f9e5; color: #1e7e34; }
+    .possible_match { background: #fff8e1; color: #8a6d00; }
+    .weak_match { background: #fdecea; color: #b71c1c; }
+    .status { font-size: 0.8rem; color: #888; }
+    .decision { font-size: 0.8rem; font-weight: 600; }
+    .rationale { max-width: 26rem; }
+    #log { font-size: 0.8rem; color: #888; margin-top: 0.5rem; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>Northstar Talent -- Resume Screening</h1>
+  <p class="sub">koboi jobs poll dashboard. Every score is advisory only -- recruiters make the call.</p>
+
+  <div class="panel">
+    <div class="row">
+      <input id="resumeId" type="text" placeholder="resume_id (e.g. R-001)" value="R-001" />
+      <button id="submitBtn">Submit for scoring</button>
+      <span id="submitStatus" class="status"></span>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="row" style="justify-content: space-between;">
+      <strong>Senior Backend Engineer -- shortlist</strong>
+      <span class="status" id="pollStatus">polling...</span>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Candidate</th>
+          <th>Score</th>
+          <th>Recommendation</th>
+          <th>Rationale</th>
+          <th>Decision</th>
+        </tr>
+      </thead>
+      <tbody id="resultsBody">
+        <tr><td colspan="5" class="status">No completed jobs yet.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div id="log"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
