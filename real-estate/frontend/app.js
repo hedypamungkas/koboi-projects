@@ -22,6 +22,9 @@ async function streamChat(message, onEvent) {
     onEvent({ type: "error", message: `Request failed (${res.status})` });
     return;
   }
+  // Needed so callers can act on session-scoped events (e.g. POST /approve for a
+  // pending_approval event) without the server sending the session id in-band.
+  const sessionId = res.headers.get("X-Session-Id");
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buf = "";
@@ -34,7 +37,7 @@ async function streamChat(message, onEvent) {
     for (const line of chunks) {
       if (!line.startsWith("data: ") || line.includes("[DONE]")) continue;
       try {
-        onEvent(JSON.parse(line.slice(6)));
+        onEvent(JSON.parse(line.slice(6)), sessionId);
       } catch (e) {
         // ignore malformed chunk
       }
@@ -101,12 +104,31 @@ chatForm.addEventListener("submit", async (e) => {
   submitBtn.disabled = true;
 
   let hint = null;
+  let redirected = false;
   const bubble = appendBubble("assistant", "");
-  await streamChat(message, (event) => {
+  await streamChat(message, (event, sessionId) => {
+    if (redirected) return; // already gave the buyer a final answer -- ignore the rest of the stream
     if (event.type === "text_delta") {
       bubble.textContent += event.text || "";
     } else if (event.type === "tool_call") {
       if (!hint) hint = appendHint("checking property details...");
+    } else if (event.type === "pending_approval") {
+      // draft_listing_description / draft_followup_email are MODERATE risk, so the
+      // server pauses the tool call and waits for a human to approve/deny via
+      // POST /v1/sessions/:id/approve. There's no approver in this buyer-facing
+      // widget, so without this branch the buyer would stare at "checking property
+      // details..." for the full timeout_seconds (120s) before the server
+      // auto-denies it anyway. Deny it ourselves immediately and redirect the buyer
+      // instead of making them wait.
+      redirected = true;
+      fetch(`${API_BASE}/v1/sessions/${sessionId}/approve`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ approval_id: event.approval_id, decision: "deny" }),
+      }).catch(() => {}); // best-effort -- the server auto-denies on timeout regardless
+      bubble.textContent =
+        "Property descriptions and follow-ups are handled by our team, not live in this chat " +
+        "-- happy to answer questions about this listing instead!";
     } else if (event.type === "error") {
       bubble.textContent = "Sorry, something went wrong -- try again shortly.";
     }

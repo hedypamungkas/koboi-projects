@@ -91,6 +91,24 @@ populated for this workstation. If you're running this outside that environment,
   of a relative path, and `config/agent.yaml` sets `guardrails`-unrelated
   `server.cors.allow_origins: ["*"]` so the browser is allowed to do that. In production you'd
   put both behind one reverse-proxy host instead.
+  **Correction (originally missed)**: `allow_origins` alone isn't enough -- `app.js` reads the
+  `X-Session-Id` response header to track sessions across turns, and per the Fetch spec a
+  cross-origin script can only read response headers a server explicitly lists in
+  `Access-Control-Expose-Headers`; unlike `curl`, a real browser enforces this. Without it,
+  `app.js`'s session variable stayed `null` forever, silently starting a new session on every
+  turn and breaking the `/v1/sessions/{id}/approve` refund-approval flow entirely. Fixed by
+  adding `expose_headers: ["X-Session-Id"]` to `server.cors` (read straight through by
+  `koboi/server/app.py`'s `CORSMiddleware` setup, which passes the whole `cors:` dict to
+  `CORSMiddleware(...)` as free-form kwargs).
+- **`rag.retriever: hybrid` + a dedicated `embedding:` block**: this app's chat `llm.base_url`
+  gateway doesn't serve embedding models, so early on `hybrid` retrieval logged a `404: No
+  available sellers for model 'text-embedding-3-small'` on every turn and silently fell back to
+  keyword-only (correct answers, but a wasted, noisy call every turn). koboi-agent's
+  `config_models.py` has a separate `EmbeddingConfig` (`embedding:` top-level key) precisely for
+  this -- a dedicated provider/base_url/api_key decoupled from the chat `llm:` client, used for
+  embedding calls when set. Pointed it at the `EMBEDDING_API_KEY`/`EMBEDDING_BASE_URL` already
+  sitting in the sibling `.env`, and real hybrid (keyword + semantic) retrieval works with zero
+  embedding errors in the logs.
 - **`auth_required: false`**: set for this local smoke-test POC only, per the task spec. In
   production this must be `true`, with tokens minted via `koboi keys create` and sent as
   `Authorization: Bearer <token>` on every request (`docs/00` §4) -- `app.js` has the header

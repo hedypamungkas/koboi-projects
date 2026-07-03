@@ -62,16 +62,19 @@ Smaller, explicitly-noted simplifications:
   to the `passthrough` default for this POC -- it only affects subprocess tools (`run_shell`, `git_*`,
   filesystem), not the MCP stdio subprocess or the local `post_journal_entry` tool, neither of which declare
   a `sandbox` dependency.
-- **Every request pins `"mode": "act"`.** koboi's default CHAT mode blocks any tool call whose name isn't in
-  a small hardcoded builtin-tool allowlist (`koboi/hooks/mode_hook.py`'s `_READ_ONLY_TOOLS`: `read`,
-  `search`, `grep`, `find`, `list`, `glob`, `web_search`, `web_fetch`, `calculator`, `delegate_tasks`) --
-  it has no way to know a custom/MCP tool like `three_way_match` is read-only, so it gets rejected in CHAT
-  mode with `"CHAT mode: tool 'three_way_match' is not allowed"`, same as a real write would be. This build
-  works around it by sending `mode: "act"` on every `/v1/chat/stream` call (`frontend/app.js`, and the smoke
-  test below) -- ACT mode allows all tools by name, and, separately, `post_journal_entry`'s
-  `RiskLevel.DESTRUCTIVE` still triggers the approval pause regardless of mode (mode and the approval gate
-  are independent checks in koboi's tool pipeline; only YOLO mode skips approval). A cleaner long-term fix
-  would be a koboi-side way to mark a specific custom/MCP tool as chat-mode-safe; there isn't one today.
+- **`agent.mode: act` is set as the config default (fixed post-merge, was a real bug).** koboi's default CHAT
+  mode blocks any tool call whose name isn't in a small hardcoded builtin-tool allowlist
+  (`koboi/hooks/mode_hook.py`'s `_READ_ONLY_TOOLS`: `read`, `search`, `grep`, `find`, `list`, `glob`,
+  `web_search`, `web_fetch`, `calculator`, `delegate_tasks`) -- it has no way to know a custom/MCP tool like
+  `three_way_match` is read-only, so it gets rejected in CHAT mode with `"CHAT mode: tool 'three_way_match' is
+  not allowed"`, same as a real write would be. This build originally only worked because every request
+  happened to pass `"mode":"act"` explicitly -- any caller that omitted it (a real risk, since it's easy to
+  forget) silently degraded instead of erroring. Fixed by setting `agent.mode: act` directly in
+  `config/agent.yaml`, so the app is correct by default regardless of what any individual request sends.
+  Separately, `post_journal_entry`'s `RiskLevel.DESTRUCTIVE` still triggers the approval pause regardless of
+  mode (mode and the approval gate are independent checks in koboi's tool pipeline; only YOLO mode skips
+  approval). A cleaner long-term fix would be a koboi-side way to mark a specific custom/MCP tool as
+  chat-mode-safe; there isn't one today.
 - **Denied/timed-out approvals aren't in the audit log.** koboi resolves DESTRUCTIVE-risk approval *before*
   `PRE_TOOL_USE` hooks run, so a rejected `post_journal_entry` call returns early and `InvoiceAuditHook`
   never sees it -- only calls that clear approval (or never needed it) get logged. An auditor asking "what

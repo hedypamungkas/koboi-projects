@@ -162,6 +162,21 @@ populated for this workstation. If you're running this outside that environment,
   the approval. Fixed by setting `agent.mode: act`; re-verified both tools end to end, including
   actually resolving the approval and checking the real `tool_result` content, not just that a
   `complete` event eventually arrived.
+- **Known limitation: a phantom `tool_call` event can appear when a skill activates and
+  `propose_redline` fires in the same completion.** Occasionally the model activates a playbook
+  skill and calls `propose_redline` in one completion; the server emits a `tool_call` SSE event
+  for that call, but no `tool_result`/`pending_approval`/`error` ever follows it. This is a
+  koboi-agent core interaction between skill activation and approval-gated (`MODERATE`+) tool
+  calls in the same completion, not a bug in this app's code, and it's out of scope to patch here
+  (that lives in koboi-agent core, not `legal-contract-review`). The model notices and
+  automatically retries in the next iteration, and that second call resolves normally -- the
+  approval gate is never bypassed; `propose_redline` still only runs after a lawyer clicks
+  Approve. `frontend/app.js` handles this gracefully already: its tool-call/approval UI state
+  (`reviewOutput`/`statusBubble` text, and each `pending_approval`'s own approval card) is always
+  overwritten by the latest SSE event rather than keyed to a specific `tool_call_id`, so the
+  first, orphaned `tool_call` event never leaves a stale "drafting..." indicator on screen -- it's
+  either replaced by the next real event or was never rendered because streamed text had already
+  taken over that UI slot.
 
 ## Open questions carried over from doc 05
 

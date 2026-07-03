@@ -36,8 +36,17 @@ tools:
   custom:
     - module: healthcare_ext.tools
 
+embedding:
+  # Dedicated embedding provider (the chat LLM gateway above doesn't serve
+  # embeddings) -- decoupled from `llm:` per koboi/config_models.py's
+  # EmbeddingConfig. Falls back to keyword-only retrieval if unset/unreachable.
+  provider: "openai"
+  base_url: "${EMBEDDING_BASE_URL:}"
+  api_key: "${EMBEDDING_API_KEY:}"
+
 rag:
   enabled: true
+  retriever: hybrid
   documents:
     - path: "/app/data/seed/red_flag_symptoms.md"
     - path: "/app/data/seed/intake_questions.md"

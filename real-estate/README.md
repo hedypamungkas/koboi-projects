@@ -115,13 +115,17 @@ All three found by actually running the e2e recipe below against a real server, 
    allowlist (`read`, `search`, `web_search`, ... plus `delegate_tasks`) whenever the *runtime* mode is CHAT
    or PLAN. That allowlist has no way to know about custom tools, so at `mode: chat` even `lookup_property`
    (SAFE) gets denied with `"CHAT mode: tool 'lookup_property' is not allowed"` -- confirmed the same way,
-   by asking a property question and getting that error back instead of an answer. Neither the job payload
-   nor this repo's `streamChat` call sends a per-request `mode`, so the config default is what actually runs
-   both paths; `mode: act` lifts the block for every tool while the safety story doc06 cares about is
-   unaffected either way, because it comes from risk level, not mode: DESTRUCTIVE tools would still pause
-   for approval (docs/00 §5) -- moot here, we have none -- and MODERATE tools never publish/send regardless
-   of which mode reached them (by construction in `src/realestate_ext/tools.py`). `server.allowed_modes`
-   still exists for a caller that wants to pass an explicit per-request `mode`.
+   by asking a property question and getting that error back instead of an answer. This repo's `streamChat`
+   call (the buyer chat widget) never sends a per-request `mode`, so the config default is what actually runs
+   that path -- and a real production nightly-cron's job payload wouldn't either. This repo's dashboard *does*
+   send one for its own demo job trigger: the "Run nightly batch now" button's `POST /v1/jobs` body explicitly
+   sets `mode: "act"` (see `frontend/app.js`), which is harmless in effect since it just matches the config
+   default below, but worth naming accurately. Either way, `mode: act` lifts the block for every tool while
+   the safety story doc06 cares about is unaffected, because it comes from risk level, not mode:
+   DESTRUCTIVE tools would still pause for approval (docs/00 §5) -- moot here, we have none -- and MODERATE
+   tools never publish/send regardless of which mode reached them (by construction in
+   `src/realestate_ext/tools.py`). `server.allowed_modes` still exists for a caller that wants to pass an
+   explicit per-request `mode`.
 
 One more prompt-level adjustment, not a config bug but worth flagging: the e2e test message ("draft
 descriptions for the 3 new properties... stale lead L-002") never states which IDs are "new" -- there's no

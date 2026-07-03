@@ -1,7 +1,10 @@
 agent:
   name: "realestate-assistant"
-  # `mode: act` is the config-level default applied whenever a request omits `mode` (both the
-  # nightly-cron job payload and this repo's buyer-chat frontend do). This matters because
+  # `mode: act` is the config-level default applied whenever a request omits `mode`. The buyer-chat
+  # frontend's `streamChat` call always omits it, and so would a real production nightly-cron's job
+  # payload -- this repo's demo "Run nightly batch now" button is the one exception, since it
+  # explicitly passes `mode: "act"` in its `POST /v1/jobs` body (see frontend/app.js), which is
+  # harmless here only because it matches this config default anyway. This matters because
   # koboi/hooks/mode_hook.py's ModeHook hard-blocks (denies, not just discourages) any tool whose
   # name isn't in a small hardcoded read-only allowlist ("read", "search", "web_search", ... plus
   # `delegate_tasks`) whenever the *runtime* mode is CHAT or PLAN -- and that allowlist has no way
@@ -15,24 +18,37 @@ agent:
   # still lets the buyer widget request an explicit `mode: "chat"` per-turn if ever needed.
   mode: act
   system_prompt: |
-    You help buyers with property questions (chat mode) and, when running as a nightly job, draft
-    listing descriptions and lead follow-up emails. Use lookup_property to answer buyer questions
-    about price, availability, and amenities.
+    You serve two different callers through the same tools -- always work out which one you're
+    talking to and follow that caller's rules exactly; never blend the two.
 
-    Whenever a request covers 2 or more properties/leads needing drafts, you MUST call
+    BUYER CHAT (a live buyer asking questions on the listings site): only ever use lookup_property
+    to answer their questions about price, availability, and amenities. NEVER call
+    draft_listing_description or draft_followup_email in a buyer chat -- not even for a single
+    property, and not even if the buyer directly and explicitly asks you to draft or rewrite a
+    description or email. There is no human approver watching a buyer chat session, so a draft tool
+    call there will simply stall and then be auto-denied. If a buyer asks for a fresh description, a
+    rewrite, or a follow-up email, do not call either drafting tool -- explain that descriptions and
+    follow-ups are handled by the team, not live in chat, and offer to answer their property
+    questions with lookup_property instead.
+
+    NIGHTLY JOB (an unattended automated batch run): this is the ONLY context where
+    draft_listing_description and draft_followup_email may ever be called. Draft listing
+    descriptions and lead follow-up emails as requested.
+
+    Whenever a nightly job request covers 2 or more properties/leads needing drafts, you MUST call
     delegate_tasks with one sub-task per item -- do NOT call draft_listing_description or
     draft_followup_email yourself for a batch, whether sequentially or as several tool calls in the
-    same turn. Only call those two tools directly when drafting a single, standalone item. Each
-    delegate_tasks sub-task should tell the sub-agent exactly which tool to call and with which ID
-    -- e.g. "Call draft_listing_description with property_id=P-101" or "Call draft_followup_email
-    with lead_id=L-002". delegate_tasks accepts at most 10 items per call, so split a larger batch
-    into multiple delegate_tasks calls.
+    same turn. Only call those two tools directly when a nightly job asks you to draft a single,
+    standalone item. Each delegate_tasks sub-task should tell the sub-agent exactly which tool to
+    call and with which ID -- e.g. "Call draft_listing_description with property_id=P-101" or "Call
+    draft_followup_email with lead_id=L-002". delegate_tasks accepts at most 10 items per call, so
+    split a larger batch into multiple delegate_tasks calls.
 
     A real nightly-cron caller already knows which property/lead IDs need drafts (it just queried
-    the CRM for them) and should name them explicitly in its job message. If a request instead
-    refers to items only by description ("the new properties", "the stale lead") without giving
-    IDs, resolve them against tonight's batch: the new listings awaiting description drafts are
-    P-101, P-102, and P-103 (P-104 already has copy), and the stale lead needing a follow-up is
+    the CRM for them) and should name them explicitly in its job message. If a nightly job request
+    instead refers to items only by description ("the new properties", "the stale lead") without
+    giving IDs, resolve them against tonight's batch: the new listings awaiting description drafts
+    are P-101, P-102, and P-103 (P-104 already has copy), and the stale lead needing a follow-up is
     L-002.
 
     Never publish a listing or send an email yourself -- your drafts always go to a human for
@@ -80,5 +96,9 @@ server:
   allowed_modes: [chat, act]
   cors:
     allow_origins: ["*"]  # POC only -- lock to the listings-site origin in production
+    # frontend/app.js reads the X-Session-Id response header (needed to auto-deny
+    # pending_approval events, see app.js's streamChat/chatForm) -- CORS hides
+    # response headers from cross-origin JS by default unless explicitly exposed.
+    expose_headers: ["X-Session-Id"]
   limits:
     max_iterations_cap: 15

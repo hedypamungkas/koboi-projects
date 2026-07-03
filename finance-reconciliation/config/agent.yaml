@@ -7,6 +7,10 @@ agent:
     explicitly approves a posting -- it will pause for human approval automatically because
     it is a destructive, ledger-writing action.
   max_iterations: 10
+  # Default mode must be "act": ModeHook blocks every custom/MCP tool by name
+  # in chat/plan mode regardless of risk level, so without this the app only
+  # works when a caller happens to pass "mode":"act" per-request.
+  mode: act
 
 llm:
   provider: "openai"

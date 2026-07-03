@@ -83,6 +83,12 @@ was checked against the source before writing `config/agent.yaml` / `frontend/ap
    list both seed files explicitly under `rag.documents`, matching what the original task brief's own
    config skeleton already had right.
 
+1b. **`rag.retriever: hybrid` + a dedicated `embedding:` block.** The chat `llm:` gateway doesn't serve
+   embedding models, so hybrid retrieval needs its own embedding provider -- koboi-agent's
+   `EmbeddingConfig` (`embedding:` top-level key) covers exactly this, decoupled from the chat client.
+   Pointed it at the `EMBEDDING_API_KEY`/`EMBEDDING_BASE_URL` already in the sibling `.env`; verified no
+   embedding errors in the logs and retrieval still correctly grounds answers in the seed protocol docs.
+
 2. **`guardrails.output` cannot be a list.** `docs/04` shows `guardrails.output: [phi_redaction]`, but
    `GuardrailsConfig.output` is typed as a single `OutputGuardrailConfig` object. Verified empirically:
    passing a list there raises `pydantic.ValidationError` (`Input should be a valid dictionary or

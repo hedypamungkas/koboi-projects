@@ -25,6 +25,14 @@ memory:
   backend: sqlite
   db_path: /data/koboi_memory.db
 
+embedding:
+  # Dedicated embedding provider (koboi-agent's chat LLM gateway doesn't serve
+  # embeddings) -- decoupled from `llm:` above per koboi/config_models.py's
+  # EmbeddingConfig. Falls back to keyword-only retrieval if unset/unreachable.
+  provider: "openai"
+  base_url: "${EMBEDDING_BASE_URL:}"
+  api_key: "${EMBEDDING_API_KEY:}"
+
 rag:
   enabled: true
   chunker: paragraph
@@ -45,6 +53,7 @@ server:
   auth_required: false   # simplified for this local smoke-test POC -- see README (would be true in production)
   cors:
     allow_origins: ["*"]
+    expose_headers: ["X-Session-Id"]
   allowed_modes: [chat, plan, act, auto]
   limits:
     max_iterations_cap: 12
