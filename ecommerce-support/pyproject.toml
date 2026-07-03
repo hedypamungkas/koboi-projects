@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ecommerce-ext"
+version = "0.1.0"
+description = "Anvil & Co e-commerce support extensions (tools) for koboi-agent."
+requires-python = ">=3.10"
+# fastapi/uvicorn come transitively via koboi-agent[api] (installed separately
+# in backend/Dockerfile); this package only needs koboi-agent's public API.
+dependencies = [
+    "koboi-agent>=0.2.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
