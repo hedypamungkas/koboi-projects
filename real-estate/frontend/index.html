@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Harbor Realty Group -- Listings Assistant</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #1c2b33;
+      --muted: #5a6b73;
+      --paper: #f6f4ef;
+      --card: #ffffff;
+      --border: #e1ddd3;
+      --accent: #1f6f5c;
+      --accent-dark: #164f42;
+      --bubble-user: #1f6f5c;
+      --bubble-agent: #eef1ee;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: var(--paper);
+      color: var(--ink);
+    }
+    header {
+      padding: 1.25rem 2rem;
+      background: var(--accent-dark);
+      color: #fff;
+    }
+    header h1 { margin: 0; font-size: 1.25rem; }
+    header p { margin: 0.2rem 0 0; color: #cfe3dc; font-size: 0.85rem; }
+    nav.tabs {
+      display: flex;
+      gap: 0.5rem;
+      padding: 0 2rem;
+      background: var(--accent-dark);
+    }
+    nav.tabs button {
+      background: transparent;
+      border: none;
+      color: #cfe3dc;
+      padding: 0.6rem 1rem;
+      font-size: 0.9rem;
+      cursor: pointer;
+      border-bottom: 3px solid transparent;
+    }
+    nav.tabs button.active {
+      color: #fff;
+      border-bottom-color: #fff;
+      font-weight: 600;
+    }
+    main {
+      max-width: 900px;
+      margin: 1.5rem auto;
+      padding: 0 1.5rem 3rem;
+    }
+    section.panel { display: none; }
+    section.panel.active { display: block; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.25rem;
+      margin-bottom: 1rem;
+    }
+    label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 0.25rem; }
+    select, input[type=text], textarea {
+      width: 100%;
+      padding: 0.55rem 0.7rem;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 0.95rem;
+      font-family: inherit;
+    }
+    button.primary {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 0.6rem 1.1rem;
+      font-size: 0.9rem;
+      cursor: pointer;
+    }
+    button.primary:hover { background: var(--accent-dark); }
+    button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    #chat-log {
+      height: 360px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+      padding: 0.25rem;
+      margin-bottom: 0.75rem;
+    }
+    .bubble {
+      max-width: 75%;
+      padding: 0.55rem 0.85rem;
+      border-radius: 12px;
+      white-space: pre-wrap;
+      font-size: 0.92rem;
+      line-height: 1.4;
+    }
+    .bubble.user {
+      align-self: flex-end;
+      background: var(--bubble-user);
+      color: #fff;
+      border-bottom-right-radius: 3px;
+    }
+    .bubble.assistant {
+      align-self: flex-start;
+      background: var(--bubble-agent);
+      color: var(--ink);
+      border-bottom-left-radius: 3px;
+    }
+    .hint {
+      align-self: flex-start;
+      font-size: 0.8rem;
+      color: var(--muted);
+      font-style: italic;
+    }
+    #chat-form { display: flex; gap: 0.5rem; }
+    #chat-form input { flex: 1; }
+    .job-row {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      margin-bottom: 0.6rem;
+      cursor: pointer;
+      background: var(--card);
+    }
+    .job-row:hover { border-color: var(--accent); }
+    .job-row .meta { font-size: 0.78rem; color: var(--muted); }
+    .status-pill {
+      display: inline-block;
+      font-size: 0.72rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+      padding: 0.15rem 0.5rem;
+      border-radius: 999px;
+      margin-left: 0.5rem;
+    }
+    .status-pending, .status-running { background: #fff3d6; color: #8a6d1a; }
+    .status-completed { background: #dcf1e6; color: #1f6f5c; }
+    .status-failed { background: #fbdede; color: #a13333; }
+    pre.draft {
+      white-space: pre-wrap;
+      background: #fbfaf6;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.75rem;
+      font-size: 0.85rem;
+      margin-top: 0.5rem;
+    }
+    .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; }
+    .empty { color: var(--muted); font-size: 0.9rem; padding: 1rem 0; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Harbor Realty Group</h1>
+    <p>Listings assistant -- buyer chat + nightly draft review, one koboi deployment</p>
+  </header>
+  <nav class="tabs">
+    <button id="tab-chat" class="active">Buyer chat</button>
+    <button id="tab-dashboard">Agent dashboard</button>
+  </nav>
+
+  <main>
+    <section id="panel-chat" class="panel active">
+      <div class="card">
+        <label for="listing-select">Which listing are you asking about?</label>
+        <select id="listing-select">
+          <option value="P-101">P-101 -- 42 Harbor View Dr, Unit 3B</option>
+          <option value="P-102">P-102 -- 118 Cedar Grove Ln</option>
+          <option value="P-103">P-103 -- 900 Riverside Ave, Apt 12 (rental)</option>
+          <option value="P-104">P-104 -- 27 Maple Court</option>
+          <option value="">(general question, no specific listing)</option>
+        </select>
+      </div>
+      <div class="card">
+        <div id="chat-log">
+          <div class="bubble assistant">Hi! Ask me about pet policy, square footage, price, or anything else about a listing.</div>
+        </div>
+        <form id="chat-form">
+          <input id="chat-input" type="text" placeholder="e.g. Is this unit pet friendly?" autocomplete="off" />
+          <button class="primary" type="submit">Send</button>
+        </form>
+      </div>
+    </section>
+
+    <section id="panel-dashboard" class="panel">
+      <div class="card">
+        <p style="margin-top:0; color: var(--muted); font-size: 0.88rem;">
+          In production this batch runs on a nightly cron via <code>POST /v1/jobs</code> (see docs/00 &sect;9 --
+          jobs aren't pushed to you, so this dashboard polls). Drafts here are never auto-published or
+          auto-sent; a human reviews each one in the CRM before it goes out.
+        </p>
+        <div class="toolbar">
+          <strong>Nightly batch runs</strong>
+          <div>
+            <button class="primary" id="run-batch-btn">Run nightly batch now</button>
+            <button class="primary" id="refresh-jobs-btn" style="background:#6b7a72; margin-left:0.4rem;">Refresh</button>
+          </div>
+        </div>
+        <div id="job-list"><p class="empty">Loading...</p></div>
+      </div>
+      <div class="card" id="job-detail-card" style="display:none;">
+        <strong>Job detail</strong>
+        <div id="job-detail"></div>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
