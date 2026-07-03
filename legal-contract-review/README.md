@@ -151,6 +151,17 @@ populated for this workstation. If you're running this outside that environment,
   production this must be `true`, with tokens minted via `koboi keys create` and sent as
   `Authorization: Bearer <token>` on every request (`docs/00` §4) -- `app.js` has the header
   plumbing in place behind an `AUTH_REQUIRED` flag, just toggled off here.
+- **`agent.mode: act`, not `chat` -- fixed post-merge, was a real live bug.** The build originally
+  shipped with `agent.mode: chat`. That looked fine in a quick e2e pass because koboi's tool
+  pipeline resolves approval *before* the mode-block check (`koboi/loop_pipeline.py`): a
+  `pending_approval` that times out unresolved denies the tool before the pipeline ever reaches
+  `ModeHook`, so a superficial test (send a message, wait for `complete`) can look like it passed
+  even though the tool never really ran. Confirmed with `flag_novel_clause` (`SAFE`, no approval
+  pause) hitting `"Error: CHAT mode: tool 'flag_novel_clause' is not allowed"` immediately, and
+  `propose_redline` (`MODERATE`) hitting the same block right after a human approval -- discarding
+  the approval. Fixed by setting `agent.mode: act`; re-verified both tools end to end, including
+  actually resolving the approval and checking the real `tool_result` content, not just that a
+  `complete` event eventually arrived.
 
 ## Open questions carried over from doc 05
 

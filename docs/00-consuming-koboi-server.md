@@ -35,6 +35,13 @@ stories — no fork, no rewrite.
 Both accept `{"message": "...", "mode": "chat|plan|act|auto", "max_iterations": 10}`. `mode` is checked
 against `server.allowed_modes`; jobs can never run in `yolo` mode, no matter what.
 
+**A naming collision worth knowing before you configure anything:** "chat" here means the *transport*
+(`/v1/chat/stream`, a live SSE conversation). But `mode` is a *different* thing — koboi's own permission
+level (`chat`/`plan`/`act`/`auto`/`yolo`), and `AgentMode.CHAT` is a locked-down, read-only mode that blocks
+every custom tool by name, regardless of its risk level. **Any app with a custom tool needs `agent.mode: act`
+as its config default** — even one that only ever talks over the interactive chat transport. Reserve
+`chat`/`plan` for an agent with zero custom tools. Every app in this repo sets `agent.mode: act`.
+
 ## 3. Streaming to the browser
 
 The server sends `data: {...}\n\n` messages and always ends with `data: [DONE]\n\n`. A minimal frontend
@@ -86,12 +93,30 @@ You add business logic in three ways, all from your own Python package — no co
 |---|---|---|
 | Call an internal API/system | a **tool**: `@tool(name=, description=, parameters=, risk_level=)` | `tools.custom: [{module: your_pkg.tools}]` in YAML |
 | Search your own knowledge base | a **retriever**: `@register_retriever("name")`, subclass `BaseRetriever` | `rag.retriever: name`, `rag.custom_modules: [...]` in YAML |
-| Log, redact, or block on tool use | a **hook**: subclass `Hook`, handle events like `PRE_TOOL_USE`/`POST_TOOL_USE` | `register_hook(...)`, imported once at app startup (no YAML for this one) |
+| Log, redact, or block on tool use | a **hook**: subclass `Hook`, handle events like `PRE_TOOL_USE`/`POST_TOOL_USE` | your own small entrypoint script, not the bare `koboi serve` CLI (see below) |
 | Filter content in/out | a **guardrail**: subclass `PatternGuardrail` | registered via a Python entry point in your package |
 
-Tools carry a risk level — `SAFE`, `MODERATE`, or `DESTRUCTIVE`. Anything `DESTRUCTIVE` (refunds, posting
-to a ledger, deleting data) automatically pauses for human approval in chat mode. That one flag is most of
-how these apps stay safe without extra plumbing.
+Tools carry a risk level — `SAFE`, `MODERATE`, or `DESTRUCTIVE`. Over the chat transport, `SAFE` runs
+immediately; **`MODERATE` and `DESTRUCTIVE` both pause for human approval** (a `pending_approval` event,
+resolved via `POST /v1/sessions/{id}/approve`) — it's not just the destructive ones. Jobs never pause for
+anything, at any risk level, since no one's watching — that's the real reason to keep a truly autonomous
+workflow's tools at `SAFE`/`MODERATE` and route anything that needs a human's eyes through chat instead.
+
+**Wiring a hook — there's no YAML key for this.** Unlike tools/RAG/context, hooks can't be preloaded via
+`koboi serve <config>`. Write a small entrypoint script instead:
+```python
+import uvicorn
+from koboi.config import Config
+from koboi.server.app import create_app
+from your_pkg.hooks import MyHook
+
+cfg = Config.from_yaml("config/agent.yaml")
+hook = MyHook()
+app = create_app(cfg, extra_hooks=[(hook.execute, hook.handles())])  # a (callback, events) tuple —
+uvicorn.run(app, host="0.0.0.0", port=8000)                          # NOT the bare Hook instance
+```
+Point your Dockerfile's `CMD` at this script instead of `koboi serve`. Inside the hook itself,
+`ctx.tool_arguments` arrives as a **JSON string**, not a dict — `json.loads()` it before reading a field.
 
 **Note on MCP tools specifically:** if you connect koboi to an MCP server (yours or a vendor's) instead of
 writing a local `@tool()`, every tool that server exposes comes in as `SAFE` — koboi has no way to mark an
@@ -118,16 +143,21 @@ You won't need all of these in one app — each sector doc below uses one or two
 
 - **MCP** — instead of writing a tool that calls an internal API directly, point koboi at an MCP server (a
   small standard-protocol service) that already exposes those operations. Useful when a system is shared
-  across multiple internal tools, not just this agent. Config: `mcp.servers: [{transport: streamable-http,
-  url: "...", auth: {type: bearer, token: "..."}}]`. koboi only ever *connects to* MCP servers — if you need
-  one, you build and host it yourself, separate from koboi.
+  across multiple internal tools, not just this agent. koboi only ever *connects to* MCP servers — if you
+  need one, you build and host it yourself, separate from koboi. Two transports exist in the code
+  (`command`/`args` stdio subprocess, and `url`/`transport: streamable-http` for a separately-hosted
+  service) — **only the stdio form has a proven working example to copy from**; the finance app in this repo
+  runs its MCP server as a stdio subprocess co-located in the same container for exactly that reason, not
+  because that's the ideal production shape.
 - **Skills** — a folder with a `SKILL.md` file (plain Markdown + a few YAML fields) instead of code. Point
   `skills.search_paths` at the folder, and koboi surfaces the right skill to the model based on what the
   conversation is about. Good for packaging a playbook or set of instructions that doesn't need any tool
   calls — just knowledge and a process to follow.
 - **Fan-out (`delegate_tasks`)** — a built-in tool the agent can call itself, mid-run, to process several
   independent items in parallel (up to 10 per call) instead of one at a time. Useful inside a single job that
-  covers a batch of similar work.
+  covers a batch of similar work. **`tools.builtin` is a hard gate, not a default-on allowlist** — an
+  empty/unset list means *zero* builtin tools, `delegate_tasks` included. List it explicitly:
+  `tools.builtin: [delegate_tasks]`.
 
 ## 8. Docker, end to end
 
@@ -148,16 +178,36 @@ volumes:
 ```
 
 `backend/Dockerfile` installs `koboi-agent[api]` plus your package, then runs
-`koboi serve config/agent.yaml --host 0.0.0.0 --port 8000`. That's the entire backend deployment.
+`koboi serve config/agent.yaml --host 0.0.0.0 --port 8000` (or your custom entrypoint script if the app uses a
+hook — see §5). That's the entire backend deployment.
+
+**The frontend and backend are always different origins** (different containers, different ports) — the
+browser will silently fail to call the API, or silently lose the session between turns, without an explicit
+CORS config:
+```yaml
+server:
+  cors:
+    allow_origins: ["*"]              # scope this down in production
+    expose_headers: ["X-Session-Id"]  # without this the browser can't read the session id — every
+                                       # "turn" starts a new session instead of continuing one
+```
 
 ## 9. What to know before you ship
 
 - **One server, one process.** No load balancing or multi-node yet — right-sized for one company's traffic,
   not a shared SaaS platform.
-- **Jobs can't pause for a human.** Design anything a job does to be safe unattended, or route the risky
-  step into chat mode instead.
+- **Jobs can't pause for a human, and jobs require `sandbox.backend: restricted`.** The server refuses to
+  start a job at all on the default `passthrough` sandbox — this isn't optional hardening, it's a hard
+  requirement for `POST /v1/jobs` to work. Design anything a job does to be safe unattended, or route the
+  risky step into chat mode instead.
 - **No webhooks.** Jobs are checked by polling or streaming, not pushed to you.
 - **Files live per-session and expire** (24h default) — nothing is a permanent file store.
 
 That's the whole contract. Everything past this point in each sector doc is what makes that business
 different: which tools it needs, what its UI looks like, and where the "built-in vs. custom" line falls.
+
+**Everything on this page has been verified against a real, running build** — all 6 apps are built, in the
+sibling project directories (`../ecommerce-support/`, `../hr-screening/`, etc.), each with a working
+`docker-compose.yml` and a `README.md` documenting the couple of sector-specific details that came up when
+actually running it. If something here and a sector doc ever disagree, the running project's README is the
+one that's been tested.

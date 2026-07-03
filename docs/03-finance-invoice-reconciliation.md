@@ -3,6 +3,10 @@
 > Builds on [`00-consuming-koboi-server.md`](00-consuming-koboi-server.md). Read that first — this doc only
 > covers what's different for this sector.
 
+> This design was written before the app existed. It's since been built and verified —
+> [`../finance-reconciliation/README.md`](../finance-reconciliation/README.md) is the tested source of truth
+> for anything the two disagree on.
+
 **One-line pitch:** Every night, koboi checks vendor invoices against purchase orders and flags anything
 that doesn't match. Every morning, the controller reviews the flags and approves postings — nothing reaches
 the ledger without a person clicking approve.
@@ -31,8 +35,8 @@ koboi handles the "who does what, when" part with nothing custom-built:
 
 Two things, because the read side and the write side deliberately live in different places.
 
-**(a) `erp-mcp`** — a small MCP server Ledgerline's IT team already runs, since other internal tools want
-the same ERP read access too. It exposes three read-only operations over Streamable HTTP:
+**(a) `erp-mcp`** — three read-only ERP operations exposed as an MCP server, since Ledgerline's IT team wants
+other internal tools to share the same ERP read access, not just this agent:
 
 | Name | What it does |
 |---|---|
@@ -40,10 +44,14 @@ the same ERP read access too. It exposes three read-only operations over Streama
 | `fetch_purchase_order` | Pull a PO and its delivery record by PO number |
 | `three_way_match` | Compare invoice vs. PO vs. delivery; write a discrepancy row to a review queue if anything's off |
 
-koboi connects to it as a client — it never hosts an MCP server itself. Implementation is a normal small
-service, not koboi-specific (Python's official `mcp` package supports Streamable HTTP); only the URL and
-token in config are koboi's concern. koboi treats all three tools as `RiskLevel.SAFE` automatically, with no
-way to mark one `DESTRUCTIVE` — a non-issue here, since all three only read.
+koboi connects to it as a client — it never hosts an MCP server itself. Two transports exist in koboi-agent
+(`command`/`args` stdio subprocess, and `url`/`transport: streamable-http` for a separately-hosted service),
+but only the stdio form has a proven working example to copy from. So `erp_mcp_server.py` runs as a **stdio
+subprocess co-located in the same container as koboi**, not the standalone service reached over Streamable
+HTTP that a shared, multi-consumer ERP integration should really be — that separately-deployed shape is still
+the better production target, and is worth revisiting once a Streamable-HTTP MCP pattern has a proven example
+to build against. koboi treats all three tools as `RiskLevel.SAFE` automatically, with no way to mark one
+`DESTRUCTIVE` — a non-issue here, since all three only read.
 
 **(b) `post_journal_entry`** — the one write, kept local on purpose. Posting to the ledger is the step
 Ledgerline won't let software do unsupervised, and MCP tools can never pause for approval — so this one stays
@@ -85,21 +93,33 @@ class InvoiceAuditHook(Hook):
 
     async def execute(self, ctx: HookContext) -> HookContext:
         row = {"ts": time.time(), "event": ctx.event.value, "tool": ctx.tool_name,
-               "args": ctx.tool_arguments,
+               "args": json.loads(ctx.tool_arguments) if ctx.tool_arguments else None,
                "result": ctx.tool_result if ctx.event == HookEvent.POST_TOOL_USE else None}
         with open("/data/audit/invoice_audit.jsonl", "a") as f:
             f.write(json.dumps(row) + "\n")
         return ctx
-
-# registered via register_hook(HookEntry(name=..., factory=lambda config, **kw: InvoiceAuditHook()))
 ```
 
-Hooks have no YAML key (doc 00 §5) — import `finance_ext.hooks` once at startup, before the agent is built.
+`ctx.tool_arguments` arrives as a JSON **string**, not a dict — `json.loads()` it before reading a field, same
+as doc 00 §5 warns.
+
+Hooks have no YAML key (doc 00 §5) — there's no config-driven way to preload one into `koboi serve`. Instead,
+a small custom entrypoint calls `create_app()` directly and passes the hook as a `(callback, events)` tuple,
+not a raw `Hook` instance (`AgentPool._build_agent` only accepts a plain callable or that tuple form — passing
+`InvoiceAuditHook()` itself crashes every request):
+
+```python
+# finance_ext/entrypoint.py -- the Dockerfile's CMD runs this instead of `koboi serve`
+audit_hook = InvoiceAuditHook()
+app = create_app(cfg, extra_hooks=[(audit_hook.execute, audit_hook.handles())])
+uvicorn.run(app, host="0.0.0.0", port=8000)
+```
 
 ## Architecture
 
 ```
- nightly cron ──▶ POST /v1/jobs (mode: act) ──▶ koboi ──▶ erp-mcp (Streamable HTTP, separate container)
+ nightly cron ──▶ POST /v1/jobs (mode: act) ──▶ koboi ──▶ erp_mcp_server.py (stdio subprocess,
+                                                              same container as koboi -- see "What you build")
                                                               fetch_invoice / fetch_purchase_order /
                                                               three_way_match (SAFE by MCP, read-only)
                                                                          │
@@ -140,20 +160,18 @@ if (evt.type === "pending_approval") {
 
 ## Docker
 
-`erp-mcp` sits in its own directory next to `backend/` and `frontend/`, with its own Dockerfile — a separate
-service that doesn't import or depend on koboi at all; koboi just points at its URL.
+`erp_mcp_server.py` ships inside the `backend/` image and starts as a stdio subprocess of koboi itself (per
+the MCP transport note above) — there's no separate `erp-mcp` service or Dockerfile for this build. A
+production deployment that wants `erp-mcp` shared across other internal tools would split it into its own
+container reached over Streamable HTTP once that transport has a proven koboi-agent example; this compose
+file reflects the stdio shortcut actually taken.
 
 ```yaml
 services:
   koboi:
-    build: ./backend                # koboi-agent[api] + finance_ext, pip install -e .
+    build: ./backend       # koboi-agent[api] + finance_ext + erp_mcp_server.py, one image
     ports: ["8000:8000"]
     volumes: ["koboi-data:/data"]   # memory db, keys, /data/audit/*.jsonl
-    env_file: .env
-    depends_on: [erp-mcp]
-  erp-mcp:
-    build: ./erp-mcp                # separate container, owns its own ERP credentials
-    ports: ["8100:8100"]
     env_file: .env
   web:
     build: ./frontend               # controller dashboard, static build
@@ -163,32 +181,40 @@ volumes:
   koboi-data:
 ```
 
-Job and chat sessions hit the same koboi container — one deployment, one config for those two; `erp-mcp` is a
-second, independent container other internal tools can point at too. Per doc 00, the job path needs
-`sandbox.backend: restricted`, since it runs unattended all night; chat sessions inherit the same config.
+Job and chat sessions hit the same koboi container — one deployment, one config, one image for the agent
+and its co-located MCP subprocess. Per doc 00, the job path needs `sandbox.backend: restricted`, since it
+runs unattended all night; chat sessions inherit the same config. `sandbox.backend` only governs subprocess
+tools that declare a `sandbox` dependency (`run_shell`, `git_*`, filesystem) — it doesn't sandbox the MCP
+subprocess or the local `post_journal_entry` tool.
 
 ## config/agent.yaml
 
 ```yaml
 agent:
   name: invoice-reconciliation
+  mode: act    # required -- ModeHook blocks every custom/MCP tool by name in chat/plan, regardless of
+               # risk level, and that includes three_way_match; see doc 00 §5
 tools:
   custom: [{module: finance_ext.tools}]   # post_journal_entry
 mcp:
   servers:
-    - transport: streamable-http
-      url: "http://erp-mcp:8100"
-      auth: {type: bearer, token: "${ERP_MCP_TOKEN}"}
+    - command: python3               # stdio subprocess, co-located with koboi -- see "What you build" above
+      args: ["/app/erp_mcp_server.py"]
 sandbox:
   backend: restricted
 server:
   allowed_modes: [chat, act]
   auth_required: true
+  cors:
+    allow_origins: ["http://localhost:3000"]  # the controller dashboard's origin
+    expose_headers: ["X-Session-Id"]          # without this the browser can't read the session id across turns
 ```
 
 `post_journal_entry`'s `DESTRUCTIVE` risk level, not a YAML flag, is what makes chat mode pause for approval
 — the three `erp-mcp` tools always come in as `SAFE`. `allowed_modes` just says which modes a request may
-ask for (`act` for the job, `chat` for the controller).
+ask for (`act` for the job, `chat` for the controller); `agent.mode: act` is the default a request gets when
+it doesn't specify one, and it's what lets the controller's chat session actually call `three_way_match` and
+`post_journal_entry` at all.
 
 ## Why it matters
 

@@ -9,7 +9,7 @@ agent:
     match, call flag_novel_clause instead of guessing. You never send, file, or sign anything --
     you only draft text inside this session for a lawyer to review.
   max_iterations: 8
-  mode: chat
+  mode: act   # NOT "chat" -- ModeHook hard-blocks every custom tool (SAFE included) in chat/plan mode
 
 llm:
   provider: "openai"

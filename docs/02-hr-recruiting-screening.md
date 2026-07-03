@@ -1,7 +1,8 @@
 # HR & Recruiting — Screening Resumes at Scale
 
 > Read [`docs/00-consuming-koboi-server.md`](00-consuming-koboi-server.md) first. This doc only covers what's
-> different for resume screening.
+> different for resume screening. The verified, tested build is [`../hr-screening/README.md`](../hr-screening/README.md) —
+> that's the source of truth if anything here and the running code disagree.
 
 Every night, turn the day's new resumes into a ranked shortlist per job, each score with a plain-English
 reason attached, for recruiters to review in the morning.
@@ -77,8 +78,8 @@ async def score_candidate(resume_id: str, score: float, rationale: str, recommen
 before anything downstream can touch it, so a bias/compliance review always has the full rationale to check:
 
 ```python
+import json
 from koboi.hooks.chain import Hook, HookContext, HookEvent
-from koboi.hooks.registry import HookEntry, register_hook
 
 class ScoringAuditHook(Hook):
     def handles(self) -> list[HookEvent]:
@@ -86,22 +87,29 @@ class ScoringAuditHook(Hook):
 
     async def execute(self, ctx: HookContext) -> HookContext:
         if ctx.tool_name == "score_candidate":
+            args = json.loads(ctx.tool_arguments) if ctx.tool_arguments else {}
             append_only_log.write({
-                "resume_id": ctx.tool_arguments["resume_id"],
-                "rationale": ctx.tool_arguments["rationale"],
+                "resume_id": args.get("resume_id"),
+                "rationale": args.get("rationale"),
                 "result": ctx.tool_result,
             })
         return ctx
-
-register_hook(HookEntry(
-    name="ScoringAuditHook",
-    should_add=lambda config, **kw: True,
-    factory=lambda config, **kw: ScoringAuditHook(),
-))
 ```
 
-Hooks aren't wired through YAML (doc 00 §5) — `register_hook()` must run once before the server builds the
-agent, so the entrypoint imports the hooks module and then starts the server, instead of the bare `koboi serve`.
+Hooks aren't wired through YAML (doc 00 §5) — there's no `tools.custom`-style config key for them. Instead a
+small entrypoint builds the `Config` itself and passes the hook straight into `create_app`, as a
+`(callback, events)` tuple rather than a bare `Hook` instance:
+
+```python
+from koboi.config import Config
+from koboi.server.app import create_app
+
+cfg = Config.from_yaml("config/agent.yaml")
+hook = ScoringAuditHook()
+app = create_app(cfg, extra_hooks=[(hook.execute, hook.handles())])  # tuple, NOT [ScoringAuditHook()]
+```
+
+This entrypoint script runs instead of the bare `koboi serve`.
 
 ## Architecture
 
@@ -168,10 +176,17 @@ tools:
   custom:
     - module: hr_ext.tools
 
+sandbox:
+  backend: restricted   # jobs require this -- the server refuses to start a job on the default passthrough
+
 jobs:
   enabled: true
   max_concurrent: 10     # bounds a burst of resumes on this one instance
   timeout_seconds: 300
+
+server:
+  cors:
+    allow_origins: ["*"]  # the dashboard (a different port) needs this or the browser blocks the call
 ```
 
 ## Why it matters

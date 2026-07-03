@@ -1,6 +1,8 @@
 # Legal — First-Pass Contract Review and Redlining
 
 > Read [`00-consuming-koboi-server.md`](00-consuming-koboi-server.md) first — this doc only covers what's different for legal.
+>
+> This design doc predates the build. [`../legal-contract-review/README.md`](../legal-contract-review/README.md) is the verified, tested source of truth — where the two disagree, the README wins.
 
 An AI that reads an incoming contract, flags the clauses that don't match your playbook, and drafts a suggested fix — a lawyer reviews and sends everything, the agent never does.
 
@@ -87,7 +89,9 @@ async def flag_novel_clause(clause_text: str, reason: str) -> str:
     ...
 ```
 
-Neither tool is `DESTRUCTIVE` — there's nothing to approve mid-run because nothing leaves the session. The real approval step is a lawyer reading the draft before using it.
+`propose_redline` is `RiskLevel.MODERATE`, not `SAFE` — and that's deliberate, not an oversight. Over the chat transport, koboi's approval handler pauses on `MODERATE` tools the same way it pauses on `DESTRUCTIVE` ones (only `SAFE` auto-approves; doc 00 §5). So the moment the model decides a clause needs a redline, the stream emits a `pending_approval` event and waits — the lawyer sees a proposed-redline card (clause type + a one-line summary) and clicks approve or reject *before* `propose_redline` ever runs and drafts the comparison text. That's a stronger safety property than "a human reads the draft before sending it": approval gates the drafting itself, not just what happens after. `flag_novel_clause` stays `SAFE` and auto-approves, since it never proposes contract language — it only raises a flag for a lawyer to look at directly.
+
+Jobs are the other half of this design: `/v1/jobs` runs under koboi's autonomous approval handler, which auto-approves `SAFE` and `MODERATE` tools alike (doc 00 §9) — so the overnight batch drafts redlines unattended and lands them in the lawyer's queue by morning, while the same tool, called from chat, pauses for a click first. One risk level, two correct behaviors depending on whether anyone's watching.
 
 ## Architecture
 
@@ -124,9 +128,15 @@ The clause-chat panel is doc 00 §3's `streamChat` with a couple of UI hooks add
 function askAboutClause(clauseText) {
   appendUserBubble(`About this clause: "${clauseText}"`);
   streamChat(`Review this clause against the playbook: ${clauseText}`, (event) => {
-    if (event.type === "text_delta") appendToBubble(event.delta);
-    if (event.type === "tool_call" && event.name === "flag_novel_clause") {
+    if (event.type === "text_delta") appendToBubble(event.content);       // koboi/events.py: "content", not "delta"
+    if (event.type === "tool_call" && event.tool_name === "flag_novel_clause") {  // "tool_name", not "name"
       showBanner("No playbook match — flagged for review");
+    }
+    if (event.type === "pending_approval") {
+      // propose_redline is MODERATE, so this fires before every redline draft (see above) --
+      // render an approve/reject card keyed on event.approval_id and resolve it via
+      // POST /v1/sessions/{id}/approve with {"approval_id", "decision": "approve"|"deny"}.
+      renderApprovalCard(event);
     }
     if (event.type === "complete") enableRedlineActions();
   });
@@ -159,6 +169,13 @@ The playbook is a set of Markdown files the firm edits when clause language chan
 ## config/agent.yaml
 
 ```yaml
+agent:
+  mode: act              # not "chat" -- ModeHook blocks every custom tool by name in chat/plan
+                          # regardless of risk level (doc 00 §2). The transport is still the
+                          # interactive /v1/chat/stream endpoint; this is koboi's separate
+                          # permission-level setting, and propose_redline/flag_novel_clause are
+                          # both custom tools.
+
 tools:
   builtin: [memory]
   custom:
@@ -171,11 +188,15 @@ skills:
 server:
   auth_required: true
   allowed_modes: [chat, act]
+  cors:
+    expose_headers: ["X-Session-Id"]   # without this the browser can't read the session id back --
+                                        # the review panel and the follow-up chat would silently
+                                        # never share a session
   limits:
     max_iterations_cap: 15
 ```
 
-`chat` covers interactive review; `act` covers the overnight batch job. `plan`, `auto`, and `yolo` add nothing here, so they're left out of `allowed_modes`. Escalation needs no extra config either: `flag_novel_clause` covers a clause with no playbook match at all, and each skill's own "escalate, do not draft" section covers a clause that matches a known type but shouldn't get an automatic redline.
+`allowed_modes: [chat, act]` names the request-time `mode` values a caller may pass (doc 00 §2's transport-level knob); `agent.mode: act` above is the config's own default permission level, and it's what actually lets `propose_redline`/`flag_novel_clause` run at all. `plan`, `auto`, and `yolo` add nothing here, so they're left out of `allowed_modes`. Escalation needs no extra config either: `flag_novel_clause` covers a clause with no playbook match at all, and each skill's own "escalate, do not draft" section covers a clause that matches a known type but shouldn't get an automatic redline.
 
 ## Why it matters
 

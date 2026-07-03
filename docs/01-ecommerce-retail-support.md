@@ -5,6 +5,9 @@ An AI agent that handles order status, shipping, and returns on a storefront —
 > Builds on [`docs/00-consuming-koboi-server.md`](00-consuming-koboi-server.md). Read that first for the API
 > shape, streaming, auth, and the built-in-vs-custom pattern — this doc only covers what's specific to this app.
 
+> Built and verified at [`../ecommerce-support/`](../ecommerce-support/) — see that project's README for the
+> exact working config and any deviations found by running it.
+
 ## The scenario
 
 **Anvil & Co** sells home goods through a Shopify storefront — about 50 people on staff, a few thousand
@@ -126,18 +129,21 @@ streamChat(message, (event) => {
   if (event.type === "pending_approval") {
     renderApprovalCard({
       sessionId: event.session_id,
+      approvalId: event.approval_id,
       summary: `Refund $${(event.arguments.amount_cents / 100).toFixed(2)} — order ${event.arguments.order_id}`,
-      onApprove: () => respond(event.session_id, true),
-      onReject: () => respond(event.session_id, false),
+      onApprove: () => respond(event.session_id, event.approval_id, "approve"),
+      onReject: () => respond(event.session_id, event.approval_id, "deny"),
     });
   }
 });
 
-async function respond(sessionId, approved) {
+// body/path shape verified against koboi/server/schema.py:ApproveRequest -- the session id is in the
+// URL, but the request body needs the approval_id plus a decision, not a bare {approved: bool}
+async function respond(sessionId, approvalId, decision) {
   await fetch(`/v1/sessions/${sessionId}/approve`, {
     method: "POST",
     headers: { "Authorization": `Bearer ${API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ approved }),
+    body: JSON.stringify({ approval_id: approvalId, decision }),
   });
 }
 ```
@@ -167,18 +173,21 @@ volumes:
 ## config/agent.yaml (excerpt)
 
 ```yaml
-mode: chat
+agent:
+  mode: act   # not chat/plan -- those block every custom tool by name, regardless of risk_level (doc 00 §2)
 
 tools:
-  builtin: [memory]
+  builtin: [memory_store, memory_recall]
   custom:
     - module: ecommerce_ext.tools
 
 rag:
   retriever: hybrid
-  chunking: paragraph
+  chunker: paragraph
   top_k: 8
-  corpus_path: data/seed/
+  documents:
+    - path: data/seed/return_policy.md
+    - path: data/seed/shipping_faq.md
 
 guardrails:
   input: { detect_injection: true }
@@ -186,6 +195,9 @@ guardrails:
 
 server:
   auth_required: true
+  cors:
+    allow_origins: ["*"]              # scope this down in production
+    expose_headers: ["X-Session-Id"]  # frontend and backend are separate origins (doc 00 §8)
   allowed_modes: [chat, act]
   limits:
     max_iterations_cap: 12

@@ -7,6 +7,10 @@ never touches the patient record.
 > Reads on top of [`00-consuming-koboi-server.md`](./00-consuming-koboi-server.md). This doc only covers
 > what's specific to intake.
 
+> The verified, tested build lives at [`../healthcare-intake/`](../healthcare-intake/README.md) — its
+> README documents the exact config values and the handful of deviations from this design doc that showed
+> up once the app was actually run against a real server.
+
 ## The scenario
 
 Riverside Family Clinic runs four locations and wants patients to fill out their symptom history online
@@ -19,20 +23,26 @@ The chat never guesses at a diagnosis, and it never writes anything into Riversi
 
 ## What you get for free
 
-koboi's RAG engine and chat mode are built in. Point `rag.corpus_path` at Riverside's protocol documents,
-set `mode: chat`, and patients already get an answer grounded in the clinic's own triage rules instead of
-whatever the model happens to know about medicine. No retrieval code, no chat loop, no session handling to
-write.
+koboi's RAG engine and chat transport are built in. Point `rag.documents` at Riverside's protocol documents,
+set `agent.mode: act` (see the note on modes below), and patients already get an answer grounded in the
+clinic's own triage rules instead of whatever the model happens to know about medicine. No retrieval code,
+no chat loop, no session handling to write.
 
 That means almost none of the engineering here is "build a chatbot." The real work is the safety layer on
 top: making sure the agent can raise a flag but can never act on it, and making sure nothing sensitive a
 patient types leaks into a log file.
 
-Also built in: an output guardrail (`guardrails.output: {detect_sensitive: true}`) that catches API keys,
-passwords, and card numbers in the model's reply — pure YAML, no code. It stops there, though: phone
-numbers, dates of birth, and insurance IDs aren't secrets in the pattern-matching sense, so this filter
-doesn't touch them. koboi's built-in filter catches secrets, not PHI — that's the custom guardrail's job,
-below.
+Also built in: an output guardrail that catches API keys, passwords, and card numbers in the model's reply —
+pure YAML, no code. It stops there, though: phone numbers, dates of birth, and insurance IDs aren't secrets
+in the pattern-matching sense, so this filter doesn't touch them. koboi's built-in filter catches secrets,
+not PHI — that's the custom guardrail's job, below.
+
+**"Chat" here is a transport, not koboi's `mode`.** This app only ever talks over the interactive
+`/v1/chat/stream` endpoint — no job/batch path — which is what "chat-only" means in this doc. But koboi's
+own `agent.mode` permission level is a different axis (doc 00 §2), and its `chat`/`plan` values block
+`flag_urgent_escalation` by name regardless of the tool's `SAFE` risk level. So the config default here is
+`agent.mode: act`, not `chat` — see the config section below for why that's still the right safety posture
+for a live patient conversation.
 
 ## What you build
 
@@ -46,9 +56,9 @@ Two small pieces, both plain extensions per doc 00 §5 — no changes to koboi i
 The important design choice: **this deployment has no tool that can write anywhere consequential.** There's
 no EHR tool, no filesystem write, no shell, no `git`. `flag_urgent_escalation` only adds a row to a review
 queue a human is already watching — it can't page anyone, can't write a chart, can't do anything on its own.
-Doc 00 explains that `DESTRUCTIVE` tools pause for human approval — this design skips that whole question by
-simply not giving the agent anything destructive to begin with. Safety here comes from what the agent
-*can't* do, not from a gate on what it can.
+Doc 00 explains that `MODERATE` and `DESTRUCTIVE` tools both pause for human approval — this design skips
+that whole question by simply not giving the agent anything above `SAFE` to begin with. Safety here comes
+from what the agent *can't* do, not from a gate on what it can.
 
 ### Don't lose the first message
 
@@ -99,7 +109,7 @@ The patient chat widget is doc 00 §3's `streamChat` with nothing added beyond r
 ```js
 streamChat(userMessage, (event) => {
   if (event.type === "text_delta") {
-    bubble.textContent += event.text;
+    bubble.textContent += event.content;
   } else if (event.type === "complete") {
     bubble.classList.add("done");
   }
@@ -137,14 +147,25 @@ as it would be for any self-hosted database holding patient data.
 ## config/agent.yaml
 
 ```yaml
-mode: chat                        # never act or yolo -- this is a live conversation with a patient
+agent:
+  mode: act                       # not "chat" -- ModeHook blocks flag_urgent_escalation by name in
+                                   # chat/plan regardless of its SAFE risk level (see the note above).
+                                   # The transport is still the interactive /v1/chat/stream endpoint;
+                                   # this is koboi's separate permission-level setting.
 
 server:
-  allowed_modes: [chat]           # anything else is rejected with 400 invalid_mode
+  allowed_modes: [act]            # anything else is rejected with 400 invalid_mode
+  cors:
+    allow_origins: ["http://localhost:3004"]   # the frontend's own origin, not "*"
+    expose_headers: ["X-Session-Id"]           # without this the browser can't read the session id
+                                                # back -- every turn would start a fresh session instead
+                                                # of continuing the intake conversation
 
 rag:
   retriever: hybrid
-  corpus_path: ./data/seed        # Riverside's triage protocol docs, versioned by clinical staff
+  documents:                      # each entry a {path: ...} -- Riverside's triage protocol docs,
+    - path: ./data/seed/red_flag_symptoms.md   # versioned by clinical staff
+    - path: ./data/seed/intake_questions.md
   top_k: 8
 
 context:
@@ -156,8 +177,9 @@ tools:
     - module: healthcare_ext.tools   # registers flag_urgent_escalation only
 
 guardrails:
-  output:
-    - phi_redaction                  # koboi.guardrails entry point, see healthcare_ext/guardrails.py
+  output:                            # a single dict, not a list -- koboi only allows one guardrail here
+    name: phi_redaction              # koboi.guardrails entry point, see healthcare_ext/guardrails.py
+    detect_sensitive: true           # folded into PHIRedactionGuardrail so secret-leak detection isn't lost
 
 # tracing intentionally left out: free-text symptom answers can carry PHI a regex
 # guardrail won't catch, so this deployment ships with tracing off rather than

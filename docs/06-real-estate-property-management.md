@@ -4,7 +4,8 @@ One koboi deployment answers buyer questions on the listings site all day, then 
 and lead follow-ups every night — no second system to build or run.
 
 > Read [`docs/00-consuming-koboi-server.md`](00-consuming-koboi-server.md) first. This doc only covers what's
-> different for real estate.
+> different for real estate. The verified, tested build is [`../real-estate/README.md`](../real-estate/README.md) —
+> that's the source of truth if anything here and the running code disagree.
 
 ## The scenario
 
@@ -167,8 +168,14 @@ Harbor already uses — and just calls `POST /v1/jobs` once per property batch a
 ## config/agent.yaml
 
 ```yaml
+agent:
+  mode: act                    # ModeHook hard-blocks every custom tool — even SAFE lookup_property — in
+                                # chat/plan mode; act is the config default both buyer chat and the nightly
+                                # job actually run under, since neither sends a per-request mode (doc 00 §2)
+
 tools:
-  builtin: [memory]
+  builtin: [delegate_tasks]    # tools.builtin is a hard gate, not a default-on allowlist — empty/unset
+                                # disables every builtin, delegate_tasks included (doc 00 §7)
   custom:
     - module: realestate_ext.tools
 
@@ -178,6 +185,9 @@ rag:
   top_k: 8
   corpus_path: data/seed/
 
+sandbox:
+  backend: restricted          # jobs refuse to start at all on the default passthrough (doc 00 §9)
+
 jobs:
   max_concurrent: 4            # concurrent JOBS (e.g. property batch + lead batch), not items within a job —
                                 # delegate_tasks handles fan-out inside a single job's turn
@@ -185,6 +195,8 @@ jobs:
 server:
   auth_required: true
   allowed_modes: [chat, act]   # buyer widget uses chat; nightly cron uses act
+  cors:
+    allow_origins: ["*"]       # scope this down to the listings site's real origin in production
   limits:
     max_iterations_cap: 15
 ```
@@ -208,3 +220,13 @@ it with a small amount of your own code, and one deployment ends up doing more t
   about how many listings or leads one job processes. Within a single job, `delegate_tasks` fans that batch
   out itself, 10 items per call. Doc 00 still flags `AgentCore` as not concurrent-safe past a handful of
   parallel jobs, so `jobs.max_concurrent` should stay low regardless of how big any one job's batch is.
+- **`draft_listing_description`/`draft_followup_email` are reachable from buyer chat, not just the nightly
+  job** — nothing in this design scopes the two `MODERATE` drafting tools to job mode only; they're
+  registered the same way for both transports, and the system prompt's "don't call these for a batch
+  yourself" instruction is guidance, not an enforced gate. Per doc 00 §5, `MODERATE` tools pause for human
+  approval (`pending_approval`) over the chat transport — so if a buyer's chat session ever gets the model to
+  call one of these directly, that session hits an approval prompt with no approver in a buyer-facing UI, and
+  the widget has no handling for that event at all. The real build's e2e test only ever drove these two tools
+  through the job path, so this was never exercised. Not fixed here — either the buyer chat widget should
+  avoid exposing these tools (a scoping mechanism doc 00 doesn't define per-transport), or the frontend needs
+  to handle an unexpected `pending_approval` gracefully instead of hanging.
