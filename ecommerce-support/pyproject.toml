@@ -10,7 +10,7 @@ requires-python = ">=3.10"
 # fastapi/uvicorn come transitively via koboi-agent[api] (installed separately
 # in backend/Dockerfile); this package only needs koboi-agent's public API.
 dependencies = [
-    "koboi-agent>=0.2.0",
+    "koboi-agent>=0.4.0",
 ]
 
 [tool.setuptools.packages.find]

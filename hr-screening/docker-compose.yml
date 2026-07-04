@@ -1,8 +1,8 @@
 services:
   koboi:
     build:
-      context: ..
-      dockerfile: hr-screening/backend/Dockerfile
+      context: .
+      dockerfile: backend/Dockerfile
     ports: ["8002:8000"]
     volumes: ["koboi-data:/data"]
     env_file:

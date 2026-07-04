@@ -161,11 +161,16 @@ You won't need all of these in one app — each sector doc below uses one or two
 
 ## 8. Docker, end to end
 
+`koboi-agent` is a real, published PyPI package — `pip install "koboi-agent[api]==<version>"` is the whole
+dependency story. No git checkout, no local wheel, no vendoring anything into your own repo.
+
 ```yaml
 # docker-compose.yml — the pattern every use case follows
 services:
   koboi:
-    build: ./backend                # koboi-agent + your custom package, pip install -e .
+    build:
+      context: .                    # your project root — Dockerfile needs to reach pyproject.toml/src/config
+      dockerfile: backend/Dockerfile
     ports: ["8000:8000"]
     volumes: ["koboi-data:/data"]   # memory db, keys, session files — must persist
     env_file: .env
@@ -177,9 +182,22 @@ volumes:
   koboi-data:
 ```
 
-`backend/Dockerfile` installs `koboi-agent[api]` plus your package, then runs
-`koboi serve config/agent.yaml --host 0.0.0.0 --port 8000` (or your custom entrypoint script if the app uses a
-hook — see §5). That's the entire backend deployment.
+```dockerfile
+# backend/Dockerfile
+FROM python:3.12-slim
+WORKDIR /app
+RUN pip install --no-cache-dir "koboi-agent[api]==<version>"
+COPY pyproject.toml ./
+COPY src ./src
+RUN pip install --no-cache-dir -e .
+COPY config ./config
+EXPOSE 8000
+CMD ["koboi", "serve", "config/agent.yaml", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+That's the entire backend deployment — koboi-agent from PyPI, your own package installed on top, `koboi serve`
+(or your custom entrypoint script if the app uses a hook — see §5). Pin the version explicitly; bump it
+deliberately, not by accident on a routine rebuild.
 
 **The frontend and backend are always different origins** (different containers, different ports) — the
 browser will silently fail to call the API, or silently lose the session between turns, without an explicit
