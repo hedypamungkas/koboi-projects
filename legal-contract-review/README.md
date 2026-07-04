@@ -84,11 +84,9 @@ Bring it down with `docker compose down`.
 
 ### Where the OpenAI credentials come from
 
-`docker-compose.yml`'s `koboi` service points `env_file` at the sibling `koboi-agent` repo's
-`.env` (absolute path), which already has `OPENAI_API_KEY` / `OPENAI_MODEL` / `OPENAI_BASE_URL`
-populated for this workstation. If you're running this outside that environment, copy
-`.env.example` to `.env` in this directory, fill it in, and change `env_file` in
-`docker-compose.yml` to point at it instead.
+Copy `.env.example` to `.env` in this directory and fill in your own `OPENAI_API_KEY` (and
+`OPENAI_MODEL`/`OPENAI_BASE_URL` if needed). `docker-compose.yml` reads it via `env_file: [.env]`.
+`.env` is gitignored -- never commit real credentials.
 
 ## Deviations from the spec docs (and why)
 

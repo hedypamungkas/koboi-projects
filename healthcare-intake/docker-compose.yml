@@ -6,7 +6,7 @@ services:
     ports: ["8004:8000"]
     volumes: ["koboi-data:/data"]
     env_file:
-      - /Users/mekari/Documents/Research-POC/ai-agent-sample/koboi-agent/.env
+      - .env
   web:
     build: ./frontend
     ports: ["3004:80"]

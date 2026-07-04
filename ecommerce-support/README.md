@@ -55,11 +55,9 @@ Bring it down with `docker compose down`.
 
 ### Where the OpenAI credentials come from
 
-`docker-compose.yml`'s `koboi` service points `env_file` at the sibling `koboi-agent` repo's
-`.env` (absolute path), which already has `OPENAI_API_KEY` / `OPENAI_MODEL` / `OPENAI_BASE_URL`
-populated for this workstation. If you're running this outside that environment, copy
-`.env.example` to `.env` in this directory, fill it in, and change `env_file` in
-`docker-compose.yml` to point at it instead.
+Copy `.env.example` to `.env` in this directory and fill in your own `OPENAI_API_KEY` (and
+`OPENAI_MODEL`/`OPENAI_BASE_URL` if you're using a proxy or non-default model). `docker-compose.yml`
+reads it via `env_file: [.env]`. `.env` is gitignored -- never commit real credentials.
 
 ## Deviations from the spec docs (and why)
 
@@ -106,9 +104,9 @@ populated for this workstation. If you're running this outside that environment,
   keyword-only (correct answers, but a wasted, noisy call every turn). koboi-agent's
   `config_models.py` has a separate `EmbeddingConfig` (`embedding:` top-level key) precisely for
   this -- a dedicated provider/base_url/api_key decoupled from the chat `llm:` client, used for
-  embedding calls when set. Pointed it at the `EMBEDDING_API_KEY`/`EMBEDDING_BASE_URL` already
-  sitting in the sibling `.env`, and real hybrid (keyword + semantic) retrieval works with zero
-  embedding errors in the logs.
+  embedding calls when set. Pointed it at `EMBEDDING_API_KEY`/`EMBEDDING_BASE_URL` (see
+  `.env.example`), and real hybrid (keyword + semantic) retrieval works with zero embedding
+  errors in the logs.
 - **`auth_required: false`**: set for this local smoke-test POC only, per the task spec. In
   production this must be `true`, with tokens minted via `koboi keys create` and sent as
   `Authorization: Bearer <token>` on every request (`docs/00` §4) -- `app.js` has the header

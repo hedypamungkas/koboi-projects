@@ -27,10 +27,9 @@ docker compose down
 
 Then open http://localhost:3004 for the patient chat.
 
-`docker-compose.yml` reads real credentials from
-`/Users/mekari/Documents/Research-POC/ai-agent-sample/koboi-agent/.env` (outside this repo, never
-committed) via `env_file:`. `.env.example` documents the three variables that file needs to define
-(`OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_BASE_URL`).
+Copy `.env.example` to `.env` in this directory and fill in your own `OPENAI_API_KEY` (and
+`OPENAI_MODEL`/`OPENAI_BASE_URL`/`EMBEDDING_*` if needed). `docker-compose.yml` reads it via
+`env_file: [.env]`. `.env` is gitignored -- never commit real credentials.
 
 ## What's built
 
@@ -86,8 +85,8 @@ was checked against the source before writing `config/agent.yaml` / `frontend/ap
 1b. **`rag.retriever: hybrid` + a dedicated `embedding:` block.** The chat `llm:` gateway doesn't serve
    embedding models, so hybrid retrieval needs its own embedding provider -- koboi-agent's
    `EmbeddingConfig` (`embedding:` top-level key) covers exactly this, decoupled from the chat client.
-   Pointed it at the `EMBEDDING_API_KEY`/`EMBEDDING_BASE_URL` already in the sibling `.env`; verified no
-   embedding errors in the logs and retrieval still correctly grounds answers in the seed protocol docs.
+   Pointed it at `EMBEDDING_API_KEY`/`EMBEDDING_BASE_URL` (see `.env.example`); verified no embedding
+   errors in the logs and retrieval still correctly grounds answers in the seed protocol docs.
 
 2. **`guardrails.output` cannot be a list.** `docs/04` shows `guardrails.output: [phi_redaction]`, but
    `GuardrailsConfig.output` is typed as a single `OutputGuardrailConfig` object. Verified empirically:

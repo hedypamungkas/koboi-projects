@@ -88,10 +88,9 @@ done
 docker compose down
 ```
 
-`docker-compose.yml` points `env_file` at an **absolute path outside this repo**
-(`/Users/mekari/Documents/Research-POC/ai-agent-sample/koboi-agent/.env`) for `OPENAI_API_KEY` /
-`OPENAI_MODEL` / `OPENAI_BASE_URL` -- see `.env.example` for the variable names only; the real key is never
-committed here.
+Copy `.env.example` to `.env` in this directory and fill in your own `OPENAI_API_KEY` (and
+`OPENAI_MODEL`/`OPENAI_BASE_URL` if needed). `docker-compose.yml` reads it via `env_file: [.env]`.
+`.env` is gitignored -- never commit real credentials.
 
 ## Deviations from the task's starter `config/agent.yaml`
 

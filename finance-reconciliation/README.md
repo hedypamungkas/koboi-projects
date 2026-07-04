@@ -106,9 +106,9 @@ docker compose build
 docker compose up -d
 ```
 
-The `koboi` service reads `env_file` from an absolute path outside this repo (a real `.env` with
-`OPENAI_API_KEY` / `OPENAI_MODEL` / `OPENAI_BASE_URL`) -- see `.env.example` for the variable names, and
-`docker-compose.yml` for the path. Never commit the real `.env`.
+Copy `.env.example` to `.env` in this directory and fill in your own `OPENAI_API_KEY` (and
+`OPENAI_MODEL`/`OPENAI_BASE_URL` if needed). `docker-compose.yml` reads it via `env_file: [.env]`.
+`.env` is gitignored -- never commit real credentials.
 
 - Backend: `http://localhost:8003` (koboi's port 8000 published)
 - Frontend: `http://localhost:3003` (controller dashboard)

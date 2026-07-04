@@ -5,7 +5,7 @@ services:
       dockerfile: backend/Dockerfile
     ports: ["8001:8000"]
     volumes: ["koboi-data:/data"]
-    env_file: ["/Users/mekari/Documents/Research-POC/ai-agent-sample/koboi-agent/.env"]
+    env_file: [.env]
   web:
     build: ./frontend
     ports: ["3001:80"]
