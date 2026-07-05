@@ -4,207 +4,588 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Harbor Realty Group -- Listings Assistant</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232a1d14'/%3E%3Ctext x='16' y='23' font-family='Georgia,serif' font-size='20' font-style='italic' fill='%23f3e6d3' text-anchor='middle'%3EH%3C/text%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..700;1,9..144,400..600&family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+    rel="stylesheet"
+  />
   <style>
-    :root {
-      color-scheme: light;
-      --ink: #1c2b33;
-      --muted: #5a6b73;
-      --paper: #f6f4ef;
-      --card: #ffffff;
-      --border: #e1ddd3;
-      --accent: #1f6f5c;
-      --accent-dark: #164f42;
-      --bubble-user: #1f6f5c;
-      --bubble-agent: #eef1ee;
-    }
+    /* ==========================================================================
+       Harbor Realty Group -- two registers, one brand.
+       Buyer chat = warm editorial consumer surface (Fraunces + Instrument Sans,
+       soft radii, terracotta/cream). Agent dashboard = operational back-office
+       surface (IBM Plex Mono/Sans, sharp radii, slate/grid). `body[data-mode]`
+       (set by index.html on load and kept in sync by app.js's activateTab) is
+       the single switch that retunes the whole page via CSS custom properties --
+       no separate stylesheets, no layout duplication.
+       ========================================================================== */
     * { box-sizing: border-box; }
+    html { color-scheme: light; }
+
+    :root {
+      --radius-pill: 999px;
+      --ease: cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    /* ---- Consumer register: Buyer chat -------------------------------------- */
+    body[data-mode="chat"] {
+      --bg-base: #f6ecdb;
+      --blob-1: rgba(193, 80, 46, 0.16);
+      --blob-2: rgba(199, 154, 75, 0.20);
+      --surface: #fffaf1;
+      --surface-alt: #fbf3e6;
+      --border: #e7d8bd;
+      --ink: #2a1d14;
+      --muted: #8a7561;
+      --accent: #c1502e;
+      --accent-dark: #8f3a20;
+      --accent-soft: #f1ded1;
+      --radius-lg: 24px;
+      --radius-md: 14px;
+      --radius-sm: 10px;
+      --font-display: "Fraunces", "Iowan Old Style", Georgia, serif;
+      --font-body: "Instrument Sans", -apple-system, "Segoe UI", sans-serif;
+      --header-bg: linear-gradient(135deg, #2b1a10 0%, #4a2416 55%, #6b2f18 100%);
+      --header-ink: #f6e9d8;
+      --header-sub: #ddb997;
+      --shadow: 0 18px 34px -20px rgba(60, 27, 8, 0.45);
+      --shadow-sm: 0 6px 16px -10px rgba(60, 27, 8, 0.35);
+    }
+
+    /* ---- Operational register: Agent dashboard ------------------------------ */
+    body[data-mode="dashboard"] {
+      --bg-base: #eceef3;
+      --blob-1: rgba(61, 90, 138, 0.08);
+      --blob-2: rgba(61, 90, 138, 0.05);
+      --surface: #ffffff;
+      --surface-alt: #f3f4f7;
+      --border: #d7dbe4;
+      --ink: #1a2030;
+      --muted: #626b7c;
+      --accent: #3d5a8a;
+      --accent-dark: #24365a;
+      --accent-soft: #e3e8f2;
+      --radius-lg: 8px;
+      --radius-md: 6px;
+      --radius-sm: 4px;
+      --font-display: "IBM Plex Mono", ui-monospace, monospace;
+      --font-body: "IBM Plex Sans", -apple-system, "Segoe UI", sans-serif;
+      --header-bg: linear-gradient(135deg, #10131b 0%, #1a2133 60%, #202b42 100%);
+      --header-ink: #eef1f7;
+      --header-sub: #8d97ab;
+      --shadow: 0 1px 2px rgba(20, 25, 38, 0.06);
+      --shadow-sm: 0 1px 2px rgba(20, 25, 38, 0.05);
+    }
+
     body {
       margin: 0;
-      font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
-      background: var(--paper);
+      min-height: 100vh;
+      background: var(--bg-base);
       color: var(--ink);
+      font-family: var(--font-body);
+      transition: background 0.35s var(--ease), color 0.35s var(--ease);
+      position: relative;
     }
+
+    /* Ambient background texture -- warm bokeh wash for chat, blueprint grid for
+       dashboard. Pure CSS, no image assets. */
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      pointer-events: none;
+      transition: opacity 0.4s var(--ease);
+    }
+    body[data-mode="chat"]::before {
+      background:
+        radial-gradient(560px 420px at 8% -6%, var(--blob-1), transparent 60%),
+        radial-gradient(620px 480px at 96% 18%, var(--blob-2), transparent 55%);
+    }
+    body[data-mode="dashboard"]::before {
+      background-image:
+        linear-gradient(var(--border) 1px, transparent 1px),
+        linear-gradient(90deg, var(--border) 1px, transparent 1px);
+      background-size: 28px 28px;
+      opacity: 0.35;
+      mask-image: linear-gradient(to bottom, black, transparent 620px);
+    }
+
+    header, nav.tabs, main { position: relative; z-index: 1; }
+
     header {
-      padding: 1.25rem 2rem;
-      background: var(--accent-dark);
-      color: #fff;
+      padding: 1.5rem 2rem;
+      background: var(--header-bg);
+      color: var(--header-ink);
+      display: flex;
+      align-items: center;
+      gap: 0.9rem;
+      transition: background 0.35s var(--ease);
     }
-    header h1 { margin: 0; font-size: 1.25rem; }
-    header p { margin: 0.2rem 0 0; color: #cfe3dc; font-size: 0.85rem; }
+    .brand-mark {
+      flex: none;
+      width: 2.35rem;
+      height: 2.35rem;
+      border-radius: var(--radius-sm);
+      border: 1px solid rgba(255, 255, 255, 0.28);
+      display: grid;
+      place-items: center;
+      font-family: "Fraunces", serif;
+      font-style: italic;
+      font-weight: 600;
+      font-size: 1.15rem;
+      background: rgba(255, 255, 255, 0.06);
+    }
+    .brand-text h1 {
+      margin: 0;
+      font-family: var(--font-display);
+      font-size: 1.3rem;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+    }
+    body[data-mode="dashboard"] .brand-text h1 { text-transform: uppercase; font-size: 1.05rem; letter-spacing: 0.06em; }
+    .brand-text p {
+      margin: 0.2rem 0 0;
+      color: var(--header-sub);
+      font-size: 0.85rem;
+    }
+    .mode-badge {
+      display: none;
+      margin-left: auto;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      padding: 0.35rem 0.7rem;
+      border-radius: var(--radius-pill);
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      color: var(--header-ink);
+      white-space: nowrap;
+    }
+    .mode-badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+    body[data-mode="dashboard"] .mode-badge { border-radius: var(--radius-sm); }
+    body[data-mode="chat"] .mode-badge-chat { display: inline-flex; }
+    body[data-mode="dashboard"] .mode-badge-dashboard { display: inline-flex; color: #ffd88a; }
+
     nav.tabs {
       display: flex;
-      gap: 0.5rem;
-      padding: 0 2rem;
-      background: var(--accent-dark);
+      gap: 0.25rem;
+      padding: 0.6rem 2rem;
+      background: var(--header-bg);
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
     }
     nav.tabs button {
+      position: relative;
       background: transparent;
       border: none;
-      color: #cfe3dc;
-      padding: 0.6rem 1rem;
-      font-size: 0.9rem;
-      cursor: pointer;
-      border-bottom: 3px solid transparent;
-    }
-    nav.tabs button.active {
-      color: #fff;
-      border-bottom-color: #fff;
+      color: var(--header-sub);
+      padding: 0.5rem 1rem;
+      font-family: var(--font-body);
+      font-size: 0.88rem;
       font-weight: 600;
+      cursor: pointer;
+      border-radius: var(--radius-pill);
+      transition: color 0.2s var(--ease), background 0.2s var(--ease);
     }
+    body[data-mode="dashboard"] nav.tabs button {
+      border-radius: var(--radius-sm);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-size: 0.76rem;
+      font-family: var(--font-display);
+    }
+    nav.tabs button.active { color: var(--header-ink); background: rgba(255, 255, 255, 0.12); }
+    nav.tabs button:hover:not(.active) { color: var(--header-ink); }
+
     main {
       max-width: 900px;
-      margin: 1.5rem auto;
+      margin: 1.75rem auto;
       padding: 0 1.5rem 3rem;
+      transition: max-width 0.3s var(--ease);
     }
+    body[data-mode="dashboard"] main { max-width: 1080px; }
+
     section.panel { display: none; }
-    section.panel.active { display: block; }
+    section.panel.active { display: block; animation: rise 0.4s var(--ease); }
+    @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
     .card {
-      background: var(--card);
+      background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 1.25rem;
-      margin-bottom: 1rem;
+      border-radius: var(--radius-lg);
+      padding: 1.5rem;
+      margin-bottom: 1.1rem;
+      box-shadow: var(--shadow-sm);
+      transition: border-radius 0.3s var(--ease), padding 0.3s var(--ease);
     }
+    body[data-mode="dashboard"] .card { padding: 1.1rem 1.25rem; }
+
+    .eyebrow {
+      margin: 0 0 0.6rem;
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    body[data-mode="dashboard"] .eyebrow { font-family: var(--font-display); }
+
     label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 0.25rem; }
-    select, input[type=text], textarea {
+    select, input[type="text"], textarea {
       width: 100%;
-      padding: 0.55rem 0.7rem;
+      padding: 0.6rem 0.8rem;
       border: 1px solid var(--border);
-      border-radius: 6px;
+      border-radius: var(--radius-sm);
       font-size: 0.95rem;
       font-family: inherit;
+      background: var(--surface);
+      color: var(--ink);
     }
+    select:focus, input[type="text"]:focus, textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-soft);
+    }
+    select {
+      appearance: none;
+      background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+      background-position: calc(100% - 18px) center, calc(100% - 13px) center;
+      background-size: 5px 5px, 5px 5px;
+      background-repeat: no-repeat;
+      padding-right: 2rem;
+    }
+
     button.primary {
       background: var(--accent);
       color: #fff;
       border: none;
-      border-radius: 6px;
-      padding: 0.6rem 1.1rem;
-      font-size: 0.9rem;
+      border-radius: var(--radius-pill);
+      padding: 0.65rem 1.25rem;
+      font-size: 0.88rem;
+      font-weight: 600;
+      font-family: inherit;
       cursor: pointer;
+      transition: background 0.2s var(--ease), transform 0.1s var(--ease), border-radius 0.3s var(--ease);
+    }
+    body[data-mode="dashboard"] button.primary {
+      border-radius: var(--radius-sm);
+      font-family: var(--font-display);
+      font-size: 0.75rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      padding: 0.55rem 0.9rem;
     }
     button.primary:hover { background: var(--accent-dark); }
-    button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    button.primary:active { transform: translateY(1px); }
+    button.primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+    button.primary.secondary {
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid var(--border);
+    }
+    button.primary.secondary:hover { background: var(--surface-alt); color: var(--ink); }
+
+    /* ---- Buyer chat tab ------------------------------------------------- */
+    .chat-layout {
+      display: grid;
+      grid-template-columns: 260px 1fr;
+      gap: 1.1rem;
+      align-items: start;
+    }
+    .listing-preview {
+      margin-top: 1rem;
+      padding-top: 1rem;
+      border-top: 1px dashed var(--border);
+    }
+    .listing-tag {
+      display: inline-block;
+      font-size: 0.68rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: var(--accent-dark);
+      background: var(--accent-soft);
+      padding: 0.2rem 0.55rem;
+      border-radius: var(--radius-pill);
+      margin-bottom: 0.5rem;
+    }
+    .listing-preview h2 {
+      margin: 0;
+      font-family: var(--font-display);
+      font-size: 1.35rem;
+      font-weight: 500;
+      line-height: 1.25;
+    }
+    .listing-preview.is-general h2 { font-style: italic; color: var(--muted); font-weight: 400; }
+    .listing-id {
+      margin: 0.3rem 0 0;
+      font-size: 0.78rem;
+      color: var(--muted);
+      letter-spacing: 0.03em;
+    }
+    .quick-questions {
+      margin-top: 1.1rem;
+      padding-top: 1rem;
+      border-top: 1px dashed var(--border);
+    }
+    .chip {
+      display: inline-block;
+      background: var(--surface-alt);
+      border: 1px solid var(--border);
+      color: var(--ink);
+      font-family: inherit;
+      font-size: 0.8rem;
+      padding: 0.4rem 0.7rem;
+      margin: 0 0.35rem 0.4rem 0;
+      border-radius: var(--radius-pill);
+      cursor: pointer;
+      transition: background 0.15s var(--ease), border-color 0.15s var(--ease);
+    }
+    .chip:hover { background: var(--accent-soft); border-color: var(--accent); }
+
+    .chat-card { display: flex; flex-direction: column; }
     #chat-log {
-      height: 360px;
+      height: 420px;
       overflow-y: auto;
       display: flex;
       flex-direction: column;
-      gap: 0.6rem;
-      padding: 0.25rem;
-      margin-bottom: 0.75rem;
+      gap: 0.7rem;
+      padding: 0.25rem 0.25rem 0.5rem;
+      margin-bottom: 0.85rem;
     }
     .bubble {
-      max-width: 75%;
-      padding: 0.55rem 0.85rem;
-      border-radius: 12px;
+      max-width: 78%;
+      padding: 0.65rem 0.95rem;
+      border-radius: var(--radius-md);
       white-space: pre-wrap;
-      font-size: 0.92rem;
-      line-height: 1.4;
+      font-size: 0.94rem;
+      line-height: 1.5;
+      animation: pop 0.28s var(--ease);
     }
+    @keyframes pop { from { opacity: 0; transform: translateY(4px) scale(0.98); } to { opacity: 1; transform: none; } }
     .bubble.user {
       align-self: flex-end;
-      background: var(--bubble-user);
+      background: var(--accent);
       color: #fff;
-      border-bottom-right-radius: 3px;
+      border-bottom-right-radius: 4px;
     }
     .bubble.assistant {
       align-self: flex-start;
-      background: var(--bubble-agent);
+      background: var(--surface-alt);
       color: var(--ink);
-      border-bottom-left-radius: 3px;
+      border: 1px solid var(--border);
+      border-bottom-left-radius: 4px;
     }
     .hint {
       align-self: flex-start;
-      font-size: 0.8rem;
+      font-size: 0.82rem;
       color: var(--muted);
       font-style: italic;
     }
-    #chat-form { display: flex; gap: 0.5rem; }
+    .hint::after {
+      content: "\2026";
+      display: inline-block;
+      width: 1em;
+      animation: dots 1.1s steps(4, end) infinite;
+      overflow: hidden;
+      vertical-align: bottom;
+    }
+    @keyframes dots { from { width: 0; } to { width: 1em; } }
+    #chat-form { display: flex; gap: 0.6rem; }
     #chat-form input { flex: 1; }
+    #chat-form button { display: inline-flex; align-items: center; gap: 0.35rem; }
+    #chat-form button::after { content: "\2192"; }
+
+    /* ---- Agent dashboard tab --------------------------------------------- */
+    .ops-note { margin: 0 0 1rem; color: var(--muted); font-size: 0.86rem; line-height: 1.5; }
+    .ops-note code {
+      background: var(--surface-alt);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.05rem 0.35rem;
+      font-family: var(--font-display);
+      font-size: 0.82em;
+    }
+    .ops-stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0.75rem;
+      margin-bottom: 1.1rem;
+    }
+    .stat {
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--surface-alt);
+      padding: 0.65rem 0.8rem;
+    }
+    .stat-value {
+      display: block;
+      font-family: var(--font-display);
+      font-size: 1.4rem;
+      font-weight: 600;
+      line-height: 1.1;
+    }
+    .stat-label {
+      display: block;
+      margin-top: 0.15rem;
+      font-size: 0.68rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .stat-pending .stat-value { color: #8a5a12; }
+    .stat-completed .stat-value { color: #166a43; }
+    .stat-failed .stat-value { color: #9c2b2b; }
+
+    .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; }
+    .toolbar strong {
+      font-family: var(--font-display);
+      font-size: 0.85rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+
     .job-row {
       border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 0.75rem 1rem;
-      margin-bottom: 0.6rem;
+      border-radius: var(--radius-sm);
+      padding: 0.7rem 0.9rem;
+      margin-bottom: 0.5rem;
       cursor: pointer;
-      background: var(--card);
+      background: var(--surface);
+      transition: border-color 0.15s var(--ease), background 0.15s var(--ease);
     }
-    .job-row:hover { border-color: var(--accent); }
-    .job-row .meta { font-size: 0.78rem; color: var(--muted); }
+    .job-row:hover { border-color: var(--accent); background: var(--surface-alt); }
+    .job-row strong { font-family: var(--font-display); font-size: 0.85rem; font-weight: 500; }
+    .job-row .meta { font-size: 0.78rem; color: var(--muted); font-family: var(--font-display); margin-top: 0.2rem; }
+    .job-row .meta code { font-family: inherit; }
+
     .status-pill {
       display: inline-block;
-      font-size: 0.72rem;
+      font-family: var(--font-display);
+      font-size: 0.68rem;
       font-weight: 600;
       text-transform: uppercase;
-      letter-spacing: 0.02em;
-      padding: 0.15rem 0.5rem;
-      border-radius: 999px;
+      letter-spacing: 0.03em;
+      padding: 0.15rem 0.55rem;
+      border-radius: var(--radius-sm);
       margin-left: 0.5rem;
+      border: 1px solid transparent;
     }
-    .status-pending, .status-running { background: #fff3d6; color: #8a6d1a; }
-    .status-completed { background: #dcf1e6; color: #1f6f5c; }
-    .status-failed { background: #fbdede; color: #a13333; }
+    .status-pending, .status-running { background: #fdf1d9; color: #8a5a12; border-color: #f0dba8; }
+    .status-completed { background: #e1f3e8; color: #166a43; border-color: #b9e3c8; }
+    .status-failed { background: #fbe3e3; color: #9c2b2b; border-color: #f3bcbc; }
+
     pre.draft {
       white-space: pre-wrap;
-      background: #fbfaf6;
+      background: var(--surface-alt);
       border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 0.75rem;
+      border-radius: var(--radius-sm);
+      padding: 0.85rem;
       font-size: 0.85rem;
+      font-family: var(--font-body);
       margin-top: 0.5rem;
+      line-height: 1.55;
     }
-    .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; }
+    #job-detail .meta { font-family: var(--font-display); font-size: 0.8rem; color: var(--muted); }
     .empty { color: var(--muted); font-size: 0.9rem; padding: 1rem 0; }
+
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: var(--radius-pill); }
+
+    @media (max-width: 720px) {
+      header { padding: 1.1rem 1.25rem; flex-wrap: wrap; }
+      nav.tabs { padding: 0.5rem 1.25rem; }
+      main { padding: 0 1rem 2.5rem; }
+      .chat-layout { grid-template-columns: 1fr; }
+      .ops-stats { grid-template-columns: repeat(2, 1fr); }
+    }
   </style>
 </head>
-<body>
+<body data-mode="chat">
   <header>
-    <h1>Harbor Realty Group</h1>
-    <p>Listings assistant -- buyer chat + nightly draft review, one koboi deployment</p>
+    <span class="brand-mark" aria-hidden="true">H</span>
+    <div class="brand-text">
+      <h1>Harbor Realty Group</h1>
+      <p>Listings assistant -- buyer chat + nightly draft review, one koboi deployment</p>
+    </div>
+    <span class="mode-badge mode-badge-chat">Live &middot; Buyer facing</span>
+    <span class="mode-badge mode-badge-dashboard">Internal &middot; Ops console</span>
   </header>
-  <nav class="tabs">
+  <nav class="tabs" aria-label="View">
     <button id="tab-chat" class="active">Buyer chat</button>
     <button id="tab-dashboard">Agent dashboard</button>
   </nav>
 
   <main>
     <section id="panel-chat" class="panel active">
-      <div class="card">
-        <label for="listing-select">Which listing are you asking about?</label>
-        <select id="listing-select">
-          <option value="P-101">P-101 -- 42 Harbor View Dr, Unit 3B</option>
-          <option value="P-102">P-102 -- 118 Cedar Grove Ln</option>
-          <option value="P-103">P-103 -- 900 Riverside Ave, Apt 12 (rental)</option>
-          <option value="P-104">P-104 -- 27 Maple Court</option>
-          <option value="">(general question, no specific listing)</option>
-        </select>
-      </div>
-      <div class="card">
-        <div id="chat-log">
-          <div class="bubble assistant">Hi! Ask me about pet policy, square footage, price, or anything else about a listing.</div>
+      <div class="chat-layout">
+        <aside class="listing-picker card">
+          <label for="listing-select">Which listing are you asking about?</label>
+          <select id="listing-select">
+            <optgroup label="For sale">
+              <option value="P-101" data-address="42 Harbor View Dr, Unit 3B" data-type="For sale">P-101 -- 42 Harbor View Dr, Unit 3B</option>
+              <option value="P-102" data-address="118 Cedar Grove Ln" data-type="For sale">P-102 -- 118 Cedar Grove Ln</option>
+              <option value="P-104" data-address="27 Maple Court" data-type="For sale">P-104 -- 27 Maple Court</option>
+            </optgroup>
+            <optgroup label="Rentals">
+              <option value="P-103" data-address="900 Riverside Ave, Apt 12" data-type="Rental">P-103 -- 900 Riverside Ave, Apt 12 (rental)</option>
+            </optgroup>
+            <optgroup label="General">
+              <option value="" data-address="" data-type="">(general question, no specific listing)</option>
+            </optgroup>
+          </select>
+          <div class="listing-preview" id="listing-preview">
+            <span class="listing-tag" id="listing-tag">For sale</span>
+            <h2 id="listing-address">42 Harbor View Dr, Unit 3B</h2>
+            <p class="listing-id" id="listing-id-label">P-101</p>
+          </div>
+          <div class="quick-questions">
+            <p class="eyebrow">Common questions</p>
+            <button type="button" class="chip" data-question="Is this pet friendly?">Pet policy</button>
+            <button type="button" class="chip" data-question="How many square feet is it?">Square footage</button>
+            <button type="button" class="chip" data-question="What's the price?">Price</button>
+            <button type="button" class="chip" data-question="What's nearby?">What's nearby</button>
+          </div>
+        </aside>
+        <div class="card chat-card">
+          <div id="chat-log">
+            <div class="bubble assistant">Hi! Ask me about pet policy, square footage, price, or anything else about a listing.</div>
+          </div>
+          <form id="chat-form">
+            <input id="chat-input" type="text" placeholder="e.g. Is this unit pet friendly?" autocomplete="off" />
+            <button class="primary" type="submit">Send</button>
+          </form>
         </div>
-        <form id="chat-form">
-          <input id="chat-input" type="text" placeholder="e.g. Is this unit pet friendly?" autocomplete="off" />
-          <button class="primary" type="submit">Send</button>
-        </form>
       </div>
     </section>
 
     <section id="panel-dashboard" class="panel">
       <div class="card">
-        <p style="margin-top:0; color: var(--muted); font-size: 0.88rem;">
+        <p class="ops-note">
           In production this batch runs on a nightly cron via <code>POST /v1/jobs</code> (see docs/00 &sect;9 --
           jobs aren't pushed to you, so this dashboard polls). Drafts here are never auto-published or
           auto-sent; a human reviews each one in the CRM before it goes out.
         </p>
+        <div class="ops-stats" id="job-stats">
+          <div class="stat"><span class="stat-value" id="stat-total">0</span><span class="stat-label">Total runs</span></div>
+          <div class="stat stat-pending"><span class="stat-value" id="stat-pending">0</span><span class="stat-label">In progress</span></div>
+          <div class="stat stat-completed"><span class="stat-value" id="stat-completed">0</span><span class="stat-label">Completed</span></div>
+          <div class="stat stat-failed"><span class="stat-value" id="stat-failed">0</span><span class="stat-label">Failed</span></div>
+        </div>
         <div class="toolbar">
           <strong>Nightly batch runs</strong>
           <div>
             <button class="primary" id="run-batch-btn">Run nightly batch now</button>
-            <button class="primary" id="refresh-jobs-btn" style="background:#6b7a72; margin-left:0.4rem;">Refresh</button>
+            <button class="primary secondary" id="refresh-jobs-btn">Refresh</button>
           </div>
         </div>
+      </div>
+      <div class="card">
         <div id="job-list"><p class="empty">Loading...</p></div>
       </div>
       <div class="card" id="job-detail-card" style="display:none;">

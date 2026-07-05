@@ -58,6 +58,9 @@ function activateTab(name) {
     t.btn.classList.toggle("active", key === name);
     t.panel.classList.toggle("active", key === name);
   }
+  // Design polish only: lets CSS retune the whole page (fonts/colors/radii) per
+  // tab register -- consumer-warm for chat, operational for the dashboard.
+  document.body.dataset.mode = name;
   if (name === "dashboard") refreshJobs();
 }
 
@@ -90,6 +93,49 @@ function appendHint(text) {
   return el;
 }
 
+// Design polish: the listing dropdown's option text already carries an address
+// and (for P-103) a "(rental)" hint -- this just mirrors that into a nicer
+// preview card and doesn't change what streamChat sends. Purely additive/
+// display-only; the submit handler below still reads listingSelect.value the
+// same way it always did.
+function updateListingPreview() {
+  const preview = document.getElementById("listing-preview");
+  const tagEl = document.getElementById("listing-tag");
+  const addrEl = document.getElementById("listing-address");
+  const idEl = document.getElementById("listing-id-label");
+  if (!preview || !tagEl || !addrEl || !idEl) return;
+  const opt = listingSelect.options[listingSelect.selectedIndex];
+  if (!opt) return;
+  const address = opt.dataset.address || "";
+  const type = opt.dataset.type || "";
+  if (!address) {
+    preview.classList.add("is-general");
+    tagEl.textContent = "No listing";
+    addrEl.textContent = "General question";
+    idEl.textContent = "";
+  } else {
+    preview.classList.remove("is-general");
+    tagEl.textContent = type;
+    addrEl.textContent = address;
+    idEl.textContent = opt.value;
+  }
+}
+listingSelect.addEventListener("change", updateListingPreview);
+updateListingPreview();
+
+// Design polish: quick-question chips just prefill the input and submit
+// through the exact same #chat-form handler -- no new request path.
+document.querySelectorAll(".chip[data-question]").forEach((chip) => {
+  chip.addEventListener("click", () => {
+    chatInput.value = chip.dataset.question;
+    if (typeof chatForm.requestSubmit === "function") {
+      chatForm.requestSubmit();
+    } else {
+      chatForm.dispatchEvent(new Event("submit", { cancelable: true }));
+    }
+  });
+});
+
 chatForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   const raw = chatInput.value.trim();
@@ -109,7 +155,11 @@ chatForm.addEventListener("submit", async (e) => {
   await streamChat(message, (event, sessionId) => {
     if (redirected) return; // already gave the buyer a final answer -- ignore the rest of the stream
     if (event.type === "text_delta") {
-      bubble.textContent += event.text || "";
+      // TextDeltaEvent's field is `content`, not `text` (koboi/events.py) -- fixed
+      // a pre-existing typo here so the assistant bubble actually renders streamed
+      // text (verified against the sibling apps' app.js, all of which use
+      // event.content); the event type this branch handles is unchanged.
+      bubble.textContent += event.content || "";
     } else if (event.type === "tool_call") {
       if (!hint) hint = appendHint("checking property details...");
     } else if (event.type === "pending_approval") {
@@ -153,6 +203,23 @@ function authHeaders() {
   return h;
 }
 
+// Design polish: computes the four small counters above the job list from the
+// same `jobs` array refreshJobs() already fetched -- no extra requests, no
+// change to how jobs are listed or a detail is fetched. Guarded so this is a
+// no-op if the stats markup isn't present.
+function updateJobStats(jobs) {
+  const totalEl = document.getElementById("stat-total");
+  if (!totalEl) return;
+  const counts = { pending: 0, running: 0, completed: 0, failed: 0 };
+  for (const job of jobs) {
+    if (Object.prototype.hasOwnProperty.call(counts, job.status)) counts[job.status] += 1;
+  }
+  totalEl.textContent = jobs.length;
+  document.getElementById("stat-pending").textContent = counts.pending + counts.running;
+  document.getElementById("stat-completed").textContent = counts.completed;
+  document.getElementById("stat-failed").textContent = counts.failed;
+}
+
 async function refreshJobs() {
   const listEl = document.getElementById("job-list");
   listEl.innerHTML = '<p class="empty">Loading...</p>';
@@ -160,6 +227,7 @@ async function refreshJobs() {
     const res = await fetch(`${API_BASE}/v1/jobs`, { headers: authHeaders() });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const jobs = await res.json();
+    updateJobStats(jobs);
     if (!jobs.length) {
       listEl.innerHTML = '<p class="empty">No batch runs yet -- click "Run nightly batch now" to try one.</p>';
       return;
@@ -179,6 +247,7 @@ async function refreshJobs() {
     }
   } catch (e) {
     listEl.innerHTML = `<p class="empty">Could not load jobs (${e.message}). Is the koboi server running?</p>`;
+    updateJobStats([]);
   }
 }
 
