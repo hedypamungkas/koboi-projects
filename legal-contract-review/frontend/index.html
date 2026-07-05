@@ -3,215 +3,541 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Kessler &amp; Vance -- Contract Review</title>
+  <title>Kessler &amp; Vance — Contract Review</title>
+  <meta name="description" content="First-pass contract clause review against the firm playbook, with human-approved redlines." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..700;1,9..144,400..600&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <style>
     :root {
       color-scheme: light;
-      --brand: #1f2a44;
-      --brand-light: #e7eaf2;
-      --accent: #8a1f2d;
-      --bg: #f7f6f3;
-      --bubble-user: #1f2a44;
-      --bubble-agent: #ffffff;
-      --border: #d7d3ca;
+      --navy-deep: #0e1428;
+      --navy: #1b2440;
+      --navy-line: rgba(255, 255, 255, 0.14);
+      --cream: #f2eee2;
+      --paper: #fffdf7;
+      --paper-shadow: rgba(20, 22, 16, 0.08);
+      --rule: #d9d1b8;
+      --rule-strong: #b9ac86;
+      --ink: #201d16;
+      --ink-soft: #5b5646;
+      --maroon: #7c2432;
+      --maroon-deep: #5a1a24;
+      --maroon-wash: #f7e9e6;
+      --ink-green: #2f5233;
+      --ink-green-deep: #203a24;
+      --gold: #9c7a2e;
+      --font-display: "Fraunces", Georgia, "Times New Roman", serif;
+      --font-body: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --font-mono: "IBM Plex Mono", "SFMono-Regular", Menlo, monospace;
     }
     * { box-sizing: border-box; }
+    html { -webkit-text-size-adjust: 100%; }
     body {
       margin: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: var(--bg);
-      color: #201f1c;
+      font-family: var(--font-body);
+      background: var(--cream);
+      color: var(--ink);
+      position: relative;
+      min-height: 100vh;
     }
-    header {
-      background: var(--brand);
-      color: #fff;
-      padding: 1rem 1.5rem;
+    /* very light paper grain -- keeps the cream field from reading as flat vector fill */
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 0;
+      opacity: 0.045;
+      mix-blend-mode: multiply;
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
     }
-    header h1 { margin: 0; font-size: 1.1rem; font-weight: 600; }
-    header p { margin: 0.15rem 0 0; font-size: 0.8rem; opacity: 0.75; }
-    main {
-      max-width: 820px;
+    header, main, footer { position: relative; z-index: 1; }
+
+    /* ---------- letterhead ---------- */
+    .doc-strip {
+      background: var(--navy-deep);
+      color: rgba(242, 238, 226, 0.72);
+      text-align: center;
+      font-family: var(--font-mono);
+      font-size: 0.66rem;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      padding: 0.35rem 0.75rem;
+    }
+    .letterhead {
+      background: var(--navy);
+      color: var(--cream);
+      padding: 1.5rem 1.75rem 1.25rem;
+      border-bottom: 4px double var(--gold);
+      box-shadow: 0 1px 0 var(--navy-deep);
+    }
+    .letterhead-inner {
+      max-width: 1180px;
       margin: 0 auto;
-      padding: 1.25rem;
-      display: grid;
-      gap: 1.25rem;
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 1.5rem;
+      flex-wrap: wrap;
     }
-    section.panel {
-      background: #fff;
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      overflow: hidden;
-    }
-    section.panel > h2 {
+    .brand { display: flex; align-items: center; gap: 0.9rem; }
+    .brand svg { flex-shrink: 0; }
+    .brand-text h1 {
       margin: 0;
-      padding: 0.75rem 1rem;
-      font-size: 0.9rem;
-      background: var(--brand-light);
-      border-bottom: 1px solid var(--border);
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 1.55rem;
+      letter-spacing: 0.01em;
     }
-    .panel-body { padding: 1rem; }
+    .brand-text h1 .amp { font-style: italic; color: var(--gold); font-weight: 400; }
+    .brand-sub {
+      margin: 0.2rem 0 0;
+      font-size: 0.72rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: rgba(242, 238, 226, 0.62);
+    }
+    .letterhead-meta { text-align: right; display: grid; gap: 0.4rem; justify-items: end; }
+    .matter-line {
+      margin: 0;
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      letter-spacing: 0.05em;
+      color: rgba(242, 238, 226, 0.55);
+    }
+    .session-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      letter-spacing: 0.03em;
+      color: rgba(242, 238, 226, 0.78);
+      border: 1px solid var(--navy-line);
+      border-radius: 999px;
+      padding: 0.3rem 0.7rem 0.3rem 0.55rem;
+    }
+    .session-badge .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: rgba(242, 238, 226, 0.35);
+      transition: background 0.3s ease, box-shadow 0.3s ease;
+    }
+    .session-badge.is-active .dot {
+      background: #6fae7a;
+      box-shadow: 0 0 0 3px rgba(111, 174, 122, 0.2);
+    }
+    .letterhead-note {
+      max-width: 1180px;
+      margin: 0.9rem auto 0;
+      font-size: 0.84rem;
+      line-height: 1.55;
+      color: rgba(242, 238, 226, 0.7);
+      max-width: 62ch;
+    }
+
+    /* ---------- layout ---------- */
+    main.workspace {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 1.75rem 1.75rem 3rem;
+      display: grid;
+      grid-template-columns: 1.55fr 1fr;
+      gap: 1.5rem 1.75rem;
+    }
+    .panel-review { grid-column: 1; grid-row: 1; }
+    .panel-approvals { grid-column: 2; grid-row: 1 / span 2; align-self: start; position: sticky; top: 1.25rem; }
+    .panel-chat { grid-column: 1; grid-row: 2; }
+
+    @media (max-width: 900px) {
+      main.workspace { grid-template-columns: 1fr; }
+      .panel-review, .panel-approvals, .panel-chat { grid-column: 1; }
+      .panel-approvals { position: static; grid-row: auto; }
+      .panel-chat { grid-row: auto; }
+    }
+
+    section.panel, aside.panel {
+      background: var(--paper);
+      border: 1px solid var(--rule);
+      border-radius: 3px;
+      box-shadow: 0 1px 2px var(--paper-shadow);
+    }
+    .panel-head {
+      display: flex;
+      align-items: baseline;
+      gap: 0.65rem;
+      padding: 0.85rem 1.1rem;
+      border-bottom: 1px solid var(--rule);
+      background: linear-gradient(var(--paper), #faf7ee);
+    }
+    .panel-num {
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      color: var(--maroon);
+      letter-spacing: 0.05em;
+      border-right: 1px solid var(--rule-strong);
+      padding-right: 0.65rem;
+    }
+    .panel-head h2 {
+      margin: 0;
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 1.05rem;
+      letter-spacing: 0.01em;
+    }
+    .panel-hint {
+      margin: 0.7rem 1.1rem 0;
+      font-size: 0.78rem;
+      line-height: 1.5;
+      color: var(--ink-soft);
+      font-style: italic;
+    }
+    .panel-body { padding: 1.1rem; }
+
+    /* ---------- clause review ---------- */
+    .field-label {
+      display: block;
+      font-family: var(--font-mono);
+      font-size: 0.74rem;
+      letter-spacing: 0.04em;
+      color: var(--ink-soft);
+      margin-bottom: 0.4rem;
+    }
+    #review-form { display: grid; gap: 0.55rem; }
     #clause-input {
       width: 100%;
-      min-height: 120px;
-      padding: 0.6rem 0.75rem;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      font-size: 0.92rem;
-      font-family: inherit;
+      min-height: 128px;
+      padding: 0.75rem 0.85rem;
+      border: 1px solid var(--rule-strong);
+      border-radius: 2px;
+      background: var(--paper);
+      font-size: 0.95rem;
+      font-family: var(--font-body);
+      line-height: 1.5;
       resize: vertical;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
     }
-    #review-form { display: grid; gap: 0.6rem; }
-    #review-form .actions { display: flex; gap: 0.5rem; }
-    button {
+    #clause-input:focus {
+      outline: none;
+      border-color: var(--navy);
+      box-shadow: 0 0 0 3px rgba(27, 36, 64, 0.1);
+    }
+    .input-meta {
+      display: flex;
+      justify-content: flex-end;
+      font-family: var(--font-mono);
+      font-size: 0.68rem;
+      color: var(--ink-soft);
+      opacity: 0.75;
+    }
+    #review-form .actions { display: flex; gap: 0.6rem; margin-top: 0.15rem; }
+
+    .btn {
       cursor: pointer;
-      border: none;
-      border-radius: 8px;
-      padding: 0.6rem 1rem;
-      font-size: 0.9rem;
+      border: 1px solid transparent;
+      border-radius: 2px;
+      padding: 0.62rem 1.15rem;
+      font-family: var(--font-body);
+      font-size: 0.8rem;
       font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.15s ease;
     }
-    #review-form button[type="submit"] { background: var(--accent); color: #fff; }
-    #discuss-clause { background: var(--brand-light); color: var(--brand); }
+    .btn:active { transform: translateY(1px); }
+    .btn-primary { background: var(--navy); color: var(--cream); }
+    .btn-primary:hover { background: var(--navy-deep); }
+    .btn-ghost { background: transparent; color: var(--navy); border-color: var(--rule-strong); }
+    .btn-ghost:hover { background: rgba(27, 36, 64, 0.06); }
+
+    .output-wrap { margin-top: 1.1rem; }
+    .output-label {
+      display: block;
+      font-family: var(--font-mono);
+      font-size: 0.68rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--ink-soft);
+      margin-bottom: 0.4rem;
+    }
     #review-output {
-      margin-top: 0.9rem;
-      padding: 0.8rem;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      background: #fbfaf8;
-      min-height: 3rem;
+      padding: 0.9rem 1rem;
+      border: 1px solid var(--rule);
+      border-left: 3px solid var(--rule-strong);
+      border-radius: 2px;
+      background: #fbf9f2;
+      min-height: 3.2rem;
       white-space: pre-wrap;
-      font-size: 0.92rem;
-      line-height: 1.45;
+      font-size: 0.93rem;
+      line-height: 1.6;
+      transition: border-left-color 0.25s ease;
     }
+    #review-output:empty::before {
+      content: "Findings will appear here once a clause is reviewed against the playbook.";
+      color: var(--ink-soft);
+      font-style: italic;
+      opacity: 0.75;
+    }
+    #review-output.has-redline { border-left-color: var(--maroon); }
+
     #flag-banner {
-      margin-top: 0.7rem;
-      padding: 0.55rem 0.8rem;
-      border-radius: 8px;
-      background: #fbeaea;
-      color: #8a2c2c;
-      border: 1px solid #e3b5b5;
-      font-size: 0.85rem;
+      margin-top: 0.8rem;
+      padding: 0.6rem 0.85rem;
+      border-radius: 2px;
+      background: var(--maroon-wash);
+      color: var(--maroon-deep);
+      border: 1px solid #dcb3ae;
+      font-size: 0.8rem;
       font-weight: 600;
+      letter-spacing: 0.02em;
     }
     #flag-banner[hidden] { display: none; }
-    #chat-log {
-      height: 300px;
-      overflow-y: auto;
-      padding: 1rem;
+    #flag-banner::before { content: "\26A0  "; }
+
+    /* ---------- approvals ---------- */
+    #approvals-list { padding: 0.9rem 1.1rem 1.1rem; display: grid; gap: 0.75rem; min-height: 3rem; }
+    #approvals-list:empty::after {
+      content: "No redlines waiting on a signature.";
+      color: var(--ink-soft);
+      font-size: 0.83rem;
+      font-style: italic;
+    }
+    .approval-card {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid var(--rule-strong);
+      border-radius: 2px;
+      padding: 0.75rem 0.85rem;
+      background: repeating-linear-gradient(
+        135deg,
+        #fffdf7,
+        #fffdf7 10px,
+        #fdfaf0 10px,
+        #fdfaf0 20px
+      );
       display: flex;
       flex-direction: column;
       gap: 0.6rem;
+      font-size: 0.86rem;
+      animation: card-in 0.28s ease both;
     }
+    @keyframes card-in {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .approval-card .eyebrow {
+      font-family: var(--font-mono);
+      font-size: 0.65rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--maroon);
+    }
+    .approval-card .summary { line-height: 1.4; color: var(--ink); }
+    .approval-card .buttons { display: flex; gap: 0.5rem; flex-shrink: 0; }
+    .approval-card .buttons button {
+      flex: 1;
+      cursor: pointer;
+      border-radius: 2px;
+      padding: 0.42rem 0.7rem;
+      font-family: var(--font-body);
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      border: 1.5px solid transparent;
+      transition: opacity 0.15s ease;
+    }
+    .approval-card button.approve { background: var(--ink-green); color: #f2f6f0; }
+    .approval-card button.approve:hover { background: var(--ink-green-deep); }
+    .approval-card button.reject { background: transparent; color: var(--maroon); border-color: var(--maroon); }
+    .approval-card button.reject:hover { background: var(--maroon-wash); }
+    .approval-card button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .approval-card.is-resolved .buttons { opacity: 0; pointer-events: none; }
+    .approval-stamp {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--font-display);
+      font-weight: 700;
+      font-size: 1.1rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      background: rgba(255, 253, 247, 0.86);
+      border: 3px solid currentColor;
+      border-radius: 3px;
+      transform: rotate(-6deg) scale(1.4);
+      opacity: 0;
+      animation: stamp-in 0.5s cubic-bezier(0.2, 1.4, 0.4, 1) forwards;
+    }
+    .approval-stamp.is-approve { color: var(--ink-green); }
+    .approval-stamp.is-deny { color: var(--maroon); }
+    @keyframes stamp-in {
+      0% { opacity: 0; transform: rotate(-6deg) scale(1.8); }
+      60% { opacity: 1; transform: rotate(-6deg) scale(0.94); }
+      100% { opacity: 1; transform: rotate(-6deg) scale(1); }
+    }
+
+    /* ---------- chat ---------- */
+    #chat-log {
+      height: 320px;
+      overflow-y: auto;
+      padding: 1.1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.65rem;
+      scrollbar-width: thin;
+      scrollbar-color: var(--rule-strong) transparent;
+    }
+    #chat-log::-webkit-scrollbar { width: 7px; }
+    #chat-log::-webkit-scrollbar-thumb { background: var(--rule-strong); border-radius: 4px; }
+
     .bubble {
-      max-width: 80%;
-      padding: 0.55rem 0.8rem;
-      border-radius: 12px;
+      max-width: 78%;
+      padding: 0.6rem 0.85rem;
+      border-radius: 3px;
       font-size: 0.92rem;
-      line-height: 1.4;
+      line-height: 1.5;
       white-space: pre-wrap;
+      animation: bubble-in 0.2s ease both;
+    }
+    @keyframes bubble-in {
+      from { opacity: 0; transform: translateY(3px); }
+      to { opacity: 1; transform: translateY(0); }
     }
     .bubble.user {
       align-self: flex-end;
-      background: var(--bubble-user);
-      color: #fff;
-      border-bottom-right-radius: 3px;
+      background: var(--navy);
+      color: var(--cream);
+      border-bottom-right-radius: 0;
     }
     .bubble.agent {
       align-self: flex-start;
-      background: var(--bubble-agent);
-      border: 1px solid var(--border);
-      border-bottom-left-radius: 3px;
+      background: var(--paper);
+      border: 1px solid var(--rule);
+      border-bottom-left-radius: 0;
+      font-family: var(--font-body);
     }
     .bubble.status {
       align-self: flex-start;
       background: transparent;
-      color: #7a7568;
+      color: var(--ink-soft);
+      font-family: var(--font-display);
       font-style: italic;
-      font-size: 0.82rem;
+      font-size: 0.85rem;
       padding: 0.1rem 0.2rem;
     }
     .bubble.error {
       align-self: stretch;
-      background: #fbeaea;
-      color: #8a2c2c;
-      border: 1px solid #e3b5b5;
+      background: var(--maroon-wash);
+      color: var(--maroon-deep);
+      border: 1px solid #dcb3ae;
     }
     form#chat-form {
       display: flex;
-      gap: 0.5rem;
-      padding: 0.75rem;
-      border-top: 1px solid var(--border);
+      gap: 0.55rem;
+      padding: 0.85rem 1.1rem;
+      border-top: 1px solid var(--rule);
     }
     #chat-input {
       flex: 1;
-      padding: 0.6rem 0.75rem;
-      border: 1px solid var(--border);
-      border-radius: 8px;
+      padding: 0.62rem 0.8rem;
+      border: 1px solid var(--rule-strong);
+      border-radius: 2px;
       font-size: 0.92rem;
+      font-family: var(--font-body);
     }
-    #chat-form button { background: var(--accent); color: #fff; }
+    #chat-input:focus {
+      outline: none;
+      border-color: var(--navy);
+      box-shadow: 0 0 0 3px rgba(27, 36, 64, 0.1);
+    }
     #chat-form button:disabled { opacity: 0.5; cursor: not-allowed; }
-    #approvals-list { padding: 0.75rem 1rem; display: grid; gap: 0.6rem; min-height: 3rem; }
-    #approvals-list:empty::after {
-      content: "No redlines waiting for approval.";
-      color: #948f81;
-      font-size: 0.85rem;
+
+    footer {
+      text-align: center;
+      color: var(--ink-soft);
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      letter-spacing: 0.03em;
+      padding-bottom: 2rem;
     }
-    .approval-card {
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 0.6rem 0.8rem;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 0.75rem;
-      font-size: 0.88rem;
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
     }
-    .approval-card .buttons { display: flex; gap: 0.4rem; flex-shrink: 0; }
-    .approval-card button.approve { background: #3c6e3c; color: #fff; }
-    .approval-card button.reject { background: #a33b3b; color: #fff; }
-    footer { text-align: center; color: #948f81; font-size: 0.75rem; padding-bottom: 1.5rem; }
   </style>
 </head>
 <body>
-  <header>
-    <h1>Kessler &amp; Vance -- Contract Review</h1>
-    <p>Paste a clause, review it against the firm's playbook, then discuss it in chat. Nothing here sends, files, or signs anything -- a lawyer reviews every draft.</p>
+  <div class="doc-strip">Attorney Work Product &middot; Privileged &amp; Confidential &middot; Draft Review Only</div>
+
+  <header class="letterhead">
+    <div class="letterhead-inner">
+      <div class="brand">
+        <svg width="46" height="46" viewBox="0 0 46 46" fill="none" aria-hidden="true">
+          <circle cx="23" cy="23" r="21.5" stroke="#9c7a2e" stroke-width="1" />
+          <circle cx="23" cy="23" r="18" stroke="#9c7a2e" stroke-width="1" opacity="0.6" />
+          <text x="23" y="29" text-anchor="middle" font-family="Fraunces, serif" font-size="15" fill="#f2eee2">K&amp;V</text>
+        </svg>
+        <div class="brand-text">
+          <h1>Kessler <span class="amp">&amp;</span> Vance</h1>
+          <p class="brand-sub">First-Pass Contract Review Desk</p>
+        </div>
+      </div>
+      <div class="letterhead-meta">
+        <div class="session-badge" id="session-badge">
+          <span class="dot"></span>
+          <span id="session-badge-text">No session yet</span>
+        </div>
+        <p class="matter-line">Matter No. 2026-0705</p>
+      </div>
+    </div>
+    <p class="letterhead-note">Paste a clause, review it against the firm's playbook, then discuss it below. Nothing here sends, files, or signs anything — a lawyer reviews and approves every draft before it leaves this screen.</p>
   </header>
 
-  <main>
-    <section class="panel">
-      <h2>Clause review</h2>
+  <main class="workspace">
+    <section class="panel panel-review">
+      <div class="panel-head"><span class="panel-num">01</span><h2>Clause Review</h2></div>
       <div class="panel-body">
         <form id="review-form">
-          <textarea id="clause-input" placeholder="Paste the clause text here, e.g. 'Vendor shall indemnify Client for any and all claims without limitation.'"></textarea>
+          <label class="field-label" for="clause-input">&sect; Clause text</label>
+          <textarea id="clause-input" placeholder="Paste the clause text here, e.g. &quot;Vendor shall indemnify Client for any and all claims without limitation.&quot;"></textarea>
+          <div class="input-meta"><span id="clause-charcount">0 characters</span></div>
           <div class="actions">
-            <button type="submit">Review</button>
-            <button type="button" id="discuss-clause">Discuss in chat</button>
+            <button type="submit" class="btn btn-primary">Review Clause</button>
+            <button type="button" id="discuss-clause" class="btn btn-ghost">Discuss in Chat</button>
           </div>
         </form>
-        <div id="review-output"></div>
+        <div class="output-wrap">
+          <span class="output-label">Playbook Findings</span>
+          <div id="review-output" aria-live="polite"></div>
+        </div>
         <div id="flag-banner" hidden></div>
       </div>
     </section>
 
-    <section class="panel">
-      <h2>Pending redline approvals</h2>
+    <aside class="panel panel-approvals">
+      <div class="panel-head"><span class="panel-num">02</span><h2>Pending Approvals</h2></div>
+      <p class="panel-hint">propose_redline pauses here before it drafts a word of redline text. Approve to let the model write it, decline to stop it there.</p>
       <div id="approvals-list"></div>
-    </section>
+    </aside>
 
-    <section class="panel">
-      <h2>Ask about this clause</h2>
-      <div id="chat-log"></div>
+    <section class="panel panel-chat">
+      <div class="panel-head"><span class="panel-num">03</span><h2>Case Discussion</h2></div>
+      <div id="chat-log" aria-live="polite"></div>
       <form id="chat-form">
         <input id="chat-input" type="text" autocomplete="off"
                placeholder="e.g. What's wrong with the limitation of liability in section 8.2?" />
-        <button type="submit">Send</button>
+        <button type="submit" class="btn btn-primary">Send</button>
       </form>
     </section>
   </main>
 
-  <footer>Demo build -- auth_required is disabled for local smoke testing only.</footer>
+  <footer>Demo build — server.auth_required is disabled for local smoke testing only.</footer>
 
   <script src="app.js"></script>
 </body>
