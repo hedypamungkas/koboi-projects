@@ -21,18 +21,32 @@ const FLAGGED_INVOICES = [
   { id: "INV-9104", vendor: "Coreway Machining", po: "PO-5610", amount: 990.0, status: "flagged" },
 ];
 
+// Minimal HTML escaping for values interpolated into innerHTML templates below
+// (defense in depth -- FLAGGED_INVOICES is static/trusted, but SSE-sourced
+// tool_name/risk_level/arguments in addApprovalCard() are not).
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, (c) => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+  ));
+}
+
 function renderInvoiceList() {
   const el = document.getElementById("invoice-list");
   el.innerHTML = "";
   for (const inv of FLAGGED_INVOICES) {
     const card = document.createElement("div");
     card.className = "invoice-card";
+    card.dataset.status = inv.status;
     card.innerHTML = `
-      <div class="row">
-        <strong>${inv.id}</strong>
-        <span class="badge ${inv.status}">${inv.status}</span>
+      <div class="invoice-card__top">
+        <span class="invoice-id">${escapeHtml(inv.id)}</span>
+        <span class="status-pill status-pill--${escapeHtml(inv.status)}"><span class="dot"></span>${escapeHtml(inv.status)}</span>
       </div>
-      <div class="vendor">${inv.vendor} &middot; ${inv.po} &middot; $${inv.amount.toFixed(2)}</div>
+      <div class="invoice-card__vendor">${escapeHtml(inv.vendor)}</div>
+      <div class="invoice-card__meta">
+        <span class="po-ref">${escapeHtml(inv.po)}</span>
+        <span class="amount">$${inv.amount.toFixed(2)}</span>
+      </div>
     `;
     card.addEventListener("click", () => {
       const input = document.getElementById("message");
@@ -43,28 +57,119 @@ function renderInvoiceList() {
   }
 }
 
+// Derived purely from FLAGGED_INVOICES -- no fabricated fields, just a quick
+// scan strip so the controller doesn't have to count cards herself.
+function renderInvoiceSummary() {
+  const el = document.getElementById("invoice-summary");
+  if (!el) return;
+  const total = FLAGGED_INVOICES.length;
+  const needsReview = FLAGGED_INVOICES.filter((inv) => inv.status === "flagged").length;
+  const totalValue = FLAGGED_INVOICES.reduce((sum, inv) => sum + inv.amount, 0);
+  el.innerHTML = `
+    <div class="stat">
+      <span class="stat-value">${total}</span>
+      <span class="stat-label">In Queue</span>
+    </div>
+    <div class="stat">
+      <span class="stat-value stat-value--amber">${needsReview}</span>
+      <span class="stat-label">Needs Review</span>
+    </div>
+    <div class="stat">
+      <span class="stat-value">$${totalValue.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
+      <span class="stat-label">Total Value</span>
+    </div>
+  `;
+}
+
+const ROLE_LABELS = { user: "You", agent: "Agent", tool: "System", error: "Error" };
+
 function addMessage(role, text) {
   const chat = document.getElementById("chat");
   const wrap = document.createElement("div");
   wrap.className = `msg ${role}`;
+  const label = document.createElement("div");
+  label.className = "msg-label";
+  label.textContent = ROLE_LABELS[role] || role;
   const bubble = document.createElement("div");
   bubble.className = "bubble";
+  // Cosmetic direction hint only (arrow prefixes are already part of the
+  // existing tool_call/tool_result text) -- doesn't affect what's displayed.
+  if (role === "tool") {
+    if (text.startsWith("->")) bubble.classList.add("tool-call");
+    else if (text.startsWith("<-")) bubble.classList.add("tool-result");
+  }
   bubble.textContent = text;
+  wrap.appendChild(label);
   wrap.appendChild(bubble);
   chat.appendChild(wrap);
   chat.scrollTop = chat.scrollHeight;
   return bubble;
 }
 
+// Lightweight "agent is working" placeholder shown between sending a message
+// and the first SSE event. Purely cosmetic -- callers remove it themselves.
+function addThinkingIndicator() {
+  const chat = document.getElementById("chat");
+  const wrap = document.createElement("div");
+  wrap.className = "msg agent thinking";
+  wrap.innerHTML = `
+    <div class="msg-label">Agent</div>
+    <div class="bubble">
+      <span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>
+    </div>
+  `;
+  chat.appendChild(wrap);
+  chat.scrollTop = chat.scrollHeight;
+  return wrap;
+}
+
+function riskClass(risk) {
+  const r = String(risk || "").toLowerCase();
+  if (r.includes("destructive")) return "destructive";
+  if (r.includes("moderate")) return "moderate";
+  return "safe";
+}
+
+// evt.arguments is always the raw JSON string koboi accumulated from the
+// tool-call stream (see koboi/events.py's ToolCallEvent/PendingApprovalEvent).
+// Render it as a readable key/value grid when it parses as a JSON object;
+// fall back to the original <pre> dump otherwise -- never lose information.
+function formatApprovalArguments(raw) {
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const rows = Object.entries(parsed)
+        .map(([k, v]) => {
+          const val = typeof v === "string" ? v : JSON.stringify(v);
+          return `<div class="kv-key">${escapeHtml(k)}</div><div class="kv-val">${escapeHtml(val)}</div>`;
+        })
+        .join("");
+      return `<div class="kv-grid">${rows}</div>`;
+    }
+  } catch (e) {
+    // not JSON -- fall through to the raw-text rendering below
+  }
+  return `<pre>${escapeHtml(raw)}</pre>`;
+}
+
 function addApprovalCard(evt) {
   const chat = document.getElementById("chat");
   const card = document.createElement("div");
-  card.className = "approval-card";
+  const risk = riskClass(evt.risk_level);
+  card.className = `approval-card risk-${risk}`;
   card.innerHTML = `
-    <div class="title">Approval needed: ${evt.tool_name} (${evt.risk_level})</div>
-    <pre>${evt.arguments}</pre>
-    <button class="approve-btn">Approve</button>
-    <button class="reject-btn">Reject</button>
+    <div class="approval-card__head">
+      <span class="approval-card__icon" aria-hidden="true">&#9888;</span>
+      <div>
+        <div class="title">Approval needed: ${escapeHtml(evt.tool_name)}</div>
+        <span class="risk-pill risk-pill--${risk}">${escapeHtml(evt.risk_level)} risk</span>
+      </div>
+    </div>
+    <div class="approval-card__body">${formatApprovalArguments(evt.arguments)}</div>
+    <div class="approval-card__actions">
+      <button type="button" class="approve-btn">Approve</button>
+      <button type="button" class="reject-btn">Reject</button>
+    </div>
   `;
   chat.appendChild(card);
   chat.scrollTop = chat.scrollHeight;
@@ -121,6 +226,8 @@ async function streamChat(message, onEvent) {
   if (newSid) {
     sessionId = newSid;
     document.getElementById("session-id").textContent = `session: ${sessionId}`;
+    const dot = document.getElementById("conn-dot");
+    if (dot) dot.classList.add("active");
   }
 
   if (!res.ok || !res.body) {
@@ -152,31 +259,47 @@ async function sendMessage(message) {
   addMessage("user", message);
   let agentBubble = null;
 
-  await streamChat(message, (evt) => {
-    switch (evt.type) {
-      case "text_delta":
-        if (!agentBubble) agentBubble = addMessage("agent", "");
-        agentBubble.textContent += evt.content;
-        break;
-      case "tool_call":
-        addMessage("tool", `-> calling ${evt.tool_name}(${evt.arguments})`);
-        break;
-      case "tool_result":
-        addMessage("tool", `<- ${evt.tool_name} result: ${evt.result}`);
-        break;
-      case "pending_approval":
-        addApprovalCard(evt);
-        break;
-      case "complete":
-        if (!agentBubble && evt.content) addMessage("agent", evt.content);
-        break;
-      case "error":
-        addMessage("error", `Error: ${evt.error || JSON.stringify(evt)}`);
-        break;
-      default:
-        console.log("event", evt);
+  // Cosmetic-only: show a typing indicator until the first SSE event lands,
+  // then clear it. Wrapped in try/finally so it never lingers on error.
+  const thinking = addThinkingIndicator();
+  let thinkingCleared = false;
+  const clearThinking = () => {
+    if (!thinkingCleared) {
+      thinkingCleared = true;
+      thinking.remove();
     }
-  });
+  };
+
+  try {
+    await streamChat(message, (evt) => {
+      clearThinking();
+      switch (evt.type) {
+        case "text_delta":
+          if (!agentBubble) agentBubble = addMessage("agent", "");
+          agentBubble.textContent += evt.content;
+          break;
+        case "tool_call":
+          addMessage("tool", `-> calling ${evt.tool_name}(${evt.arguments})`);
+          break;
+        case "tool_result":
+          addMessage("tool", `<- ${evt.tool_name} result: ${evt.result}`);
+          break;
+        case "pending_approval":
+          addApprovalCard(evt);
+          break;
+        case "complete":
+          if (!agentBubble && evt.content) addMessage("agent", evt.content);
+          break;
+        case "error":
+          addMessage("error", `Error: ${evt.error || JSON.stringify(evt)}`);
+          break;
+        default:
+          console.log("event", evt);
+      }
+    });
+  } finally {
+    clearThinking();
+  }
 }
 
 document.getElementById("composer").addEventListener("submit", (e) => {
@@ -189,3 +312,4 @@ document.getElementById("composer").addEventListener("submit", (e) => {
 });
 
 renderInvoiceList();
+renderInvoiceSummary();
