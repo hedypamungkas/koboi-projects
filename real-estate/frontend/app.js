@@ -9,15 +9,29 @@ const API_KEY = window.KOBOI_API_KEY || "";
 // ---------------------------------------------------------------------------
 // Shared streaming helper (docs/00 #3)
 // ---------------------------------------------------------------------------
+// Bounds how long a single turn can stay open. Without this, a stalled/hung
+// connection (rare, but observed once against the LLM gateway during testing --
+// see koboi-use-cases-llm-gateway-empty-completions memory) leaves the buyer
+// staring at "checking property details..." forever with no way to recover.
+const STREAM_TIMEOUT_MS = 90_000;
+
 async function streamChat(message, onEvent) {
   const headers = { "Content-Type": "application/json" };
   if (API_KEY) headers["Authorization"] = `Bearer ${API_KEY}`;
 
-  const res = await fetch(`${API_BASE}/v1/chat/stream`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ message }),
-  });
+  let res;
+  try {
+    res = await fetch(`${API_BASE}/v1/chat/stream`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ message }),
+      signal: AbortSignal.timeout(STREAM_TIMEOUT_MS),
+    });
+  } catch (err) {
+    const timedOut = err.name === "TimeoutError" || err.name === "AbortError";
+    onEvent({ type: "error", message: timedOut ? "Request timed out" : String(err) });
+    return;
+  }
   if (!res.ok || !res.body) {
     onEvent({ type: "error", message: `Request failed (${res.status})` });
     return;
@@ -28,20 +42,25 @@ async function streamChat(message, onEvent) {
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buf = "";
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    const chunks = buf.split("\n\n");
-    buf = chunks.pop(); // keep the last (possibly incomplete) chunk in the buffer
-    for (const line of chunks) {
-      if (!line.startsWith("data: ") || line.includes("[DONE]")) continue;
-      try {
-        onEvent(JSON.parse(line.slice(6)), sessionId);
-      } catch (e) {
-        // ignore malformed chunk
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const chunks = buf.split("\n\n");
+      buf = chunks.pop(); // keep the last (possibly incomplete) chunk in the buffer
+      for (const line of chunks) {
+        if (!line.startsWith("data: ") || line.includes("[DONE]")) continue;
+        try {
+          onEvent(JSON.parse(line.slice(6)), sessionId);
+        } catch (e) {
+          // ignore malformed chunk
+        }
       }
     }
+  } catch (err) {
+    const timedOut = err.name === "TimeoutError" || err.name === "AbortError";
+    onEvent({ type: "error", message: timedOut ? "Request timed out" : String(err) });
   }
 }
 
@@ -152,39 +171,52 @@ chatForm.addEventListener("submit", async (e) => {
   let hint = null;
   let redirected = false;
   const bubble = appendBubble("assistant", "");
-  await streamChat(message, (event, sessionId) => {
-    if (redirected) return; // already gave the buyer a final answer -- ignore the rest of the stream
-    if (event.type === "text_delta") {
-      // TextDeltaEvent's field is `content`, not `text` (koboi/events.py) -- fixed
-      // a pre-existing typo here so the assistant bubble actually renders streamed
-      // text (verified against the sibling apps' app.js, all of which use
-      // event.content); the event type this branch handles is unchanged.
-      bubble.textContent += event.content || "";
-    } else if (event.type === "tool_call") {
-      if (!hint) hint = appendHint("checking property details...");
-    } else if (event.type === "pending_approval") {
-      // draft_listing_description / draft_followup_email are MODERATE risk, so the
-      // server pauses the tool call and waits for a human to approve/deny via
-      // POST /v1/sessions/:id/approve. There's no approver in this buyer-facing
-      // widget, so without this branch the buyer would stare at "checking property
-      // details..." for the full timeout_seconds (120s) before the server
-      // auto-denies it anyway. Deny it ourselves immediately and redirect the buyer
-      // instead of making them wait.
-      redirected = true;
-      fetch(`${API_BASE}/v1/sessions/${sessionId}/approve`, {
-        method: "POST",
-        headers: authHeaders(),
-        body: JSON.stringify({ approval_id: event.approval_id, decision: "deny" }),
-      }).catch(() => {}); // best-effort -- the server auto-denies on timeout regardless
-      bubble.textContent =
-        "Property descriptions and follow-ups are handled by our team, not live in this chat " +
-        "-- happy to answer questions about this listing instead!";
-    } else if (event.type === "error") {
-      bubble.textContent = "Sorry, something went wrong -- try again shortly.";
-    }
-  });
-  if (hint) hint.remove();
-  submitBtn.disabled = false;
+  try {
+    await streamChat(message, (event, sessionId) => {
+      if (redirected) return; // already gave the buyer a final answer -- ignore the rest of the stream
+      if (event.type === "text_delta") {
+        // TextDeltaEvent's field is `content`, not `text` (koboi/events.py) -- fixed
+        // a pre-existing typo here so the assistant bubble actually renders streamed
+        // text (verified against the sibling apps' app.js, all of which use
+        // event.content); the event type this branch handles is unchanged.
+        bubble.textContent += event.content || "";
+      } else if (event.type === "tool_call") {
+        if (!hint) hint = appendHint("checking property details...");
+      } else if (event.type === "pending_approval") {
+        // draft_listing_description / draft_followup_email are MODERATE risk, so the
+        // server pauses the tool call and waits for a human to approve/deny via
+        // POST /v1/sessions/:id/approve. There's no approver in this buyer-facing
+        // widget, so without this branch the buyer would stare at "checking property
+        // details..." for the full timeout_seconds (120s) before the server
+        // auto-denies it anyway. Deny it ourselves immediately and redirect the buyer
+        // instead of making them wait.
+        redirected = true;
+        fetch(`${API_BASE}/v1/sessions/${sessionId}/approve`, {
+          method: "POST",
+          headers: authHeaders(),
+          body: JSON.stringify({ approval_id: event.approval_id, decision: "deny" }),
+        }).catch(() => {}); // best-effort -- the server auto-denies on timeout regardless
+        bubble.textContent =
+          "Property descriptions and follow-ups are handled by our team, not live in this chat " +
+          "-- happy to answer questions about this listing instead!";
+      } else if (event.type === "complete") {
+        // The model occasionally returns a completion with no text and no tool
+        // call (confirmed gateway nondeterminism, not an app bug -- see
+        // koboi-use-cases-llm-gateway-empty-completions memory). Without this,
+        // the buyer would see their message met with a permanently empty bubble.
+        if (!bubble.textContent) {
+          bubble.textContent = "Sorry, I didn't get a response there -- could you ask again?";
+        }
+      } else if (event.type === "error") {
+        bubble.textContent = "Sorry, something went wrong -- try again shortly.";
+      }
+    });
+  } catch (err) {
+    bubble.textContent = "Sorry, something went wrong -- try again shortly.";
+  } finally {
+    if (hint) hint.remove();
+    submitBtn.disabled = false;
+  }
 });
 
 // ---------------------------------------------------------------------------

@@ -21,15 +21,30 @@ const API_BASE = window.KOBOI_API_BASE || "http://localhost:8004";
 
 let sessionId = null;
 
+// Bounds how long a single turn can stay open. Without this, a stalled/hung
+// connection (rare, but observed once against the LLM gateway during testing --
+// see koboi-use-cases-llm-gateway-empty-completions memory) leaves the patient
+// staring at a pending bubble forever with no way to recover.
+const STREAM_TIMEOUT_MS = 90_000;
+
 async function streamChat(message, onEvent) {
   const headers = { "Content-Type": "application/json" };
   if (sessionId) headers["X-Session-Id"] = sessionId;
 
-  const res = await fetch(`${API_BASE}/v1/chat/stream`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ message }),
-  });
+  let res;
+  try {
+    res = await fetch(`${API_BASE}/v1/chat/stream`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ message }),
+      signal: AbortSignal.timeout(STREAM_TIMEOUT_MS),
+    });
+  } catch (err) {
+    if (err.name === "TimeoutError" || err.name === "AbortError") {
+      throw new Error("That took too long to answer -- please try again.");
+    }
+    throw err;
+  }
 
   if (!res.ok) {
     let detail = res.statusText;
@@ -48,24 +63,31 @@ async function streamChat(message, onEvent) {
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buf = "";
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    const frames = buf.split("\n\n");
-    buf = frames.pop() ?? ""; // keep the last, possibly-incomplete frame
-    for (const frame of frames) {
-      for (const line of frame.split("\n")) {
-        if (!line.startsWith("data: ")) continue;
-        const payload = line.slice(6);
-        if (payload === "[DONE]") continue;
-        try {
-          onEvent(JSON.parse(payload));
-        } catch {
-          /* ignore malformed frame (e.g. SSE keepalive comment) */
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const frames = buf.split("\n\n");
+      buf = frames.pop() ?? ""; // keep the last, possibly-incomplete frame
+      for (const frame of frames) {
+        for (const line of frame.split("\n")) {
+          if (!line.startsWith("data: ")) continue;
+          const payload = line.slice(6);
+          if (payload === "[DONE]") continue;
+          try {
+            onEvent(JSON.parse(payload));
+          } catch {
+            /* ignore malformed frame (e.g. SSE keepalive comment) */
+          }
         }
       }
     }
+  } catch (err) {
+    if (err.name === "TimeoutError" || err.name === "AbortError") {
+      throw new Error("That took too long to answer -- please try again.");
+    }
+    throw err;
   }
 }
 
@@ -116,9 +138,14 @@ form.addEventListener("submit", async (evt) => {
         // Final text after output guardrails have run (may include a
         // [GUARDRAIL WARNING ...] prefix -- see README). This is the
         // authoritative text; it can differ from what streamed live.
-        assistantBubble.textContent = event.content;
+        // Falls back to a friendly prompt when the model returns nothing at all
+        // (confirmed gateway nondeterminism, not an app bug -- see
+        // koboi-use-cases-llm-gateway-empty-completions memory) so the patient
+        // never sees a silently blank reply.
+        const finalText = event.content || "Sorry, I didn't catch that -- could you say it again?";
+        assistantBubble.textContent = finalText;
         assistantBubble.classList.remove("pending");
-        announce(event.content);
+        announce(finalText);
       } else if (event.type === "error") {
         assistantBubble.remove();
         addBubble("error", `Something went wrong: ${event.error}`);

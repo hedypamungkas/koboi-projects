@@ -211,16 +211,30 @@ function addApprovalCard(evt) {
 // triggers the approval pause (mode and the approval gate are orthogonal
 // checks in koboi's tool pipeline; only YOLO mode skips approval). See
 // README's "Deliberate deviations" section.
+// Bounds how long a single turn can stay open. Without this, a stalled/hung
+// connection (rare, but observed once against the LLM gateway during testing --
+// see koboi-use-cases-llm-gateway-empty-completions memory) leaves the typing
+// indicator stuck forever with no way for the controller to recover.
+const STREAM_TIMEOUT_MS = 90_000;
+
 async function streamChat(message, onEvent) {
   const headers = { "Content-Type": "application/json" };
   if (API_KEY) headers["Authorization"] = `Bearer ${API_KEY}`;
   if (sessionId) headers["X-Session-Id"] = sessionId;
 
-  const res = await fetch(`${API_BASE}/v1/chat/stream`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ message, mode: "act" }),
-  });
+  let res;
+  try {
+    res = await fetch(`${API_BASE}/v1/chat/stream`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ message, mode: "act" }),
+      signal: AbortSignal.timeout(STREAM_TIMEOUT_MS),
+    });
+  } catch (err) {
+    const timedOut = err.name === "TimeoutError" || err.name === "AbortError";
+    onEvent({ type: "error", error: timedOut ? "Request timed out -- please try again." : String(err) });
+    return;
+  }
 
   const newSid = res.headers.get("X-Session-Id");
   if (newSid) {
@@ -238,20 +252,25 @@ async function streamChat(message, onEvent) {
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buf = "";
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    const parts = buf.split("\n\n");
-    buf = parts.pop(); // keep the last (possibly incomplete) chunk in the buffer
-    for (const line of parts) {
-      if (!line.startsWith("data: ") || line.includes("[DONE]")) continue;
-      try {
-        onEvent(JSON.parse(line.slice(6)));
-      } catch (e) {
-        console.warn("bad SSE frame", line, e);
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const parts = buf.split("\n\n");
+      buf = parts.pop(); // keep the last (possibly incomplete) chunk in the buffer
+      for (const line of parts) {
+        if (!line.startsWith("data: ") || line.includes("[DONE]")) continue;
+        try {
+          onEvent(JSON.parse(line.slice(6)));
+        } catch (e) {
+          console.warn("bad SSE frame", line, e);
+        }
       }
     }
+  } catch (err) {
+    const timedOut = err.name === "TimeoutError" || err.name === "AbortError";
+    onEvent({ type: "error", error: timedOut ? "Request timed out -- please try again." : String(err) });
   }
 }
 
@@ -288,7 +307,13 @@ async function sendMessage(message) {
           addApprovalCard(evt);
           break;
         case "complete":
-          if (!agentBubble && evt.content) addMessage("agent", evt.content);
+          // The model occasionally returns a completion with no text and no tool
+          // call (confirmed gateway nondeterminism, not an app bug -- see
+          // koboi-use-cases-llm-gateway-empty-completions memory). Without this
+          // fallback, the controller would see her message met with total silence.
+          if (!agentBubble) {
+            addMessage("agent", evt.content || "No response came back for that -- try rephrasing or resending.");
+          }
           break;
         case "error":
           addMessage("error", `Error: ${evt.error || JSON.stringify(evt)}`);

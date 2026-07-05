@@ -54,15 +54,31 @@ if (clauseInput && clauseCharCount) {
 // docs/00-consuming-koboi-server.md §3. Reports the server-assigned session id (X-Session-Id
 // response header) back to the caller once known, so the clause review and the follow-up chat
 // share one session/memory.
+// Bounds how long a single turn can stay open. Without this, a stalled/hung
+// connection (rare, but observed once against the LLM gateway during testing --
+// see koboi-use-cases-llm-gateway-empty-completions memory) leaves the review
+// panel or chat stuck on "Thinking..." forever with no way for the lawyer to
+// recover.
+const STREAM_TIMEOUT_MS = 90_000;
+
 async function streamChat(message, onEvent, onSessionId) {
   const headers = { "Content-Type": "application/json", ...authHeaders() };
   if (sessionId) headers["X-Session-Id"] = sessionId;
 
-  const res = await fetch(`${API_BASE}/v1/chat/stream`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ message }),
-  });
+  let res;
+  try {
+    res = await fetch(`${API_BASE}/v1/chat/stream`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ message }),
+      signal: AbortSignal.timeout(STREAM_TIMEOUT_MS),
+    });
+  } catch (err) {
+    if (err.name === "TimeoutError" || err.name === "AbortError") {
+      throw new Error("The review agent took too long to respond -- please try again.");
+    }
+    throw err;
+  }
 
   const sid = res.headers.get("X-Session-Id");
   if (sid && onSessionId) onSessionId(sid);
@@ -75,22 +91,29 @@ async function streamChat(message, onEvent, onSessionId) {
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buf = "";
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    const parts = buf.split("\n\n");
-    buf = parts.pop(); // keep the last (possibly incomplete) chunk in the buffer
-    for (const line of parts) {
-      if (!line.startsWith("data: ")) continue;
-      const payload = line.slice(6);
-      if (payload.trim() === "[DONE]") continue;
-      try {
-        onEvent(JSON.parse(payload));
-      } catch (err) {
-        console.error("Failed to parse SSE event", err, payload);
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const parts = buf.split("\n\n");
+      buf = parts.pop(); // keep the last (possibly incomplete) chunk in the buffer
+      for (const line of parts) {
+        if (!line.startsWith("data: ")) continue;
+        const payload = line.slice(6);
+        if (payload.trim() === "[DONE]") continue;
+        try {
+          onEvent(JSON.parse(payload));
+        } catch (err) {
+          console.error("Failed to parse SSE event", err, payload);
+        }
       }
     }
+  } catch (err) {
+    if (err.name === "TimeoutError" || err.name === "AbortError") {
+      throw new Error("The review agent took too long to respond -- please try again.");
+    }
+    throw err;
   }
 }
 
@@ -287,6 +310,10 @@ function askAboutClause(text) {
           break;
         case "complete":
           if (statusBubble.isConnected) statusBubble.remove();
+          // The model occasionally returns a completion with no text and no tool
+          // call (confirmed gateway nondeterminism, not an app bug -- see
+          // koboi-use-cases-llm-gateway-empty-completions memory).
+          if (!agentBubble) addBubble("agent", "Sorry, I didn't get a response there -- try asking again.");
           break;
         case "error":
           statusBubble.remove();
@@ -334,6 +361,10 @@ async function sendChatMessage(message) {
             break;
           case "complete":
             if (statusBubble.isConnected) statusBubble.remove();
+            // The model occasionally returns a completion with no text and no tool
+            // call (confirmed gateway nondeterminism, not an app bug -- see
+            // koboi-use-cases-llm-gateway-empty-completions memory).
+            if (!agentBubble) addBubble("agent", "Sorry, I didn't get a response there -- try asking again.");
             break;
           case "error":
             statusBubble.remove();

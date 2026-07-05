@@ -43,15 +43,30 @@ function authHeaders() {
 // Shared streaming helper -- fetch + ReadableStream against /v1/chat/stream,
 // per docs/00-consuming-koboi-server.md §3. Reports the server-assigned
 // session id (X-Session-Id header) back to the caller once known.
+// Bounds how long a single turn can stay open. Without this, a stalled/hung
+// connection (rare, but observed once against the LLM gateway during testing --
+// see koboi-use-cases-llm-gateway-empty-completions memory) leaves the "Thinking..."
+// status bubble stuck forever with no way for the shopper to recover.
+const STREAM_TIMEOUT_MS = 90_000;
+
 async function streamChat(message, onEvent, onSessionId) {
   const headers = { "Content-Type": "application/json", ...authHeaders() };
   if (sessionId) headers["X-Session-Id"] = sessionId;
 
-  const res = await fetch(`${API_BASE}/v1/chat/stream`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ message }),
-  });
+  let res;
+  try {
+    res = await fetch(`${API_BASE}/v1/chat/stream`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ message }),
+      signal: AbortSignal.timeout(STREAM_TIMEOUT_MS),
+    });
+  } catch (err) {
+    if (err.name === "TimeoutError" || err.name === "AbortError") {
+      throw new Error("The support agent took too long to respond -- please try again.");
+    }
+    throw err;
+  }
 
   const sid = res.headers.get("X-Session-Id");
   if (sid && onSessionId) onSessionId(sid);
@@ -64,22 +79,29 @@ async function streamChat(message, onEvent, onSessionId) {
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buf = "";
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    const parts = buf.split("\n\n");
-    buf = parts.pop(); // keep the last (possibly incomplete) chunk in the buffer
-    for (const line of parts) {
-      if (!line.startsWith("data: ")) continue;
-      const payload = line.slice(6);
-      if (payload.trim() === "[DONE]") continue;
-      try {
-        onEvent(JSON.parse(payload));
-      } catch (err) {
-        console.error("Failed to parse SSE event", err, payload);
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const parts = buf.split("\n\n");
+      buf = parts.pop(); // keep the last (possibly incomplete) chunk in the buffer
+      for (const line of parts) {
+        if (!line.startsWith("data: ")) continue;
+        const payload = line.slice(6);
+        if (payload.trim() === "[DONE]") continue;
+        try {
+          onEvent(JSON.parse(payload));
+        } catch (err) {
+          console.error("Failed to parse SSE event", err, payload);
+        }
       }
     }
+  } catch (err) {
+    if (err.name === "TimeoutError" || err.name === "AbortError") {
+      throw new Error("The support agent took too long to respond -- please try again.");
+    }
+    throw err;
   }
 }
 
@@ -217,6 +239,11 @@ async function sendMessage(message) {
           }
           case "complete":
             if (statusBubble.isConnected) statusBubble.remove();
+            // The model occasionally returns a completion with no text and no tool
+            // call (confirmed gateway nondeterminism, not an app bug -- see
+            // koboi-use-cases-llm-gateway-empty-completions memory). Without this,
+            // the shopper would see their message met with total silence.
+            if (!agentBubble) addBubble("agent", "Sorry, I didn't quite catch that -- could you ask again?");
             break;
           case "error":
             statusBubble.remove();
