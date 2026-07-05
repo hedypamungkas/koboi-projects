@@ -22,10 +22,32 @@ const chatForm = document.getElementById("chat-form");
 const chatInput = document.getElementById("chat-input");
 const approvalsList = document.getElementById("approvals-list");
 
+// Purely cosmetic elements added for the letterhead redesign -- optional chaining below means
+// none of this throws if a future markup pass ever removes them.
+const sessionBadge = document.getElementById("session-badge");
+const sessionBadgeText = document.getElementById("session-badge-text");
+const clauseCharCount = document.getElementById("clause-charcount");
+
 let sessionId = null; // set from the X-Session-Id response header on the first turn
 
 function authHeaders() {
   return AUTH_REQUIRED ? { Authorization: `Bearer ${API_KEY}` } : {};
+}
+
+// Cosmetic only -- reflects the already-established sessionId in the letterhead badge so the
+// lawyer can see the review panel and the chat panel are sharing one session/memory. Does not
+// change how sessionId itself is set or used in any request.
+function updateSessionBadge(sid) {
+  if (!sessionBadge || !sessionBadgeText) return;
+  sessionBadge.classList.add("is-active");
+  sessionBadgeText.textContent = `Session ${sid.slice(0, 8)}`;
+}
+
+if (clauseInput && clauseCharCount) {
+  clauseInput.addEventListener("input", () => {
+    const n = clauseInput.value.length;
+    clauseCharCount.textContent = `${n} character${n === 1 ? "" : "s"}`;
+  });
 }
 
 // Shared streaming helper -- fetch + ReadableStream against /v1/chat/stream, per
@@ -101,7 +123,15 @@ function renderApprovalCard(approval) {
   card.className = "approval-card";
   card.dataset.approvalId = approval.approvalId;
 
+  // Eyebrow + summary line replace the old single <span> label -- purely a DOM/CSS restructure
+  // for the letterhead redesign, still just descriptive text built from approval.summary.
+  const eyebrow = document.createElement("span");
+  eyebrow.className = "eyebrow";
+  eyebrow.textContent = "Pending — awaiting signature";
+  card.appendChild(eyebrow);
+
   const label = document.createElement("span");
+  label.className = "summary";
   label.textContent = approval.summary;
   card.appendChild(label);
 
@@ -115,7 +145,7 @@ function renderApprovalCard(approval) {
 
   const rejectBtn = document.createElement("button");
   rejectBtn.className = "reject";
-  rejectBtn.textContent = "Reject";
+  rejectBtn.textContent = "Decline";
   rejectBtn.onclick = () => resolveApproval(approval, "deny", card);
 
   buttons.appendChild(approveBtn);
@@ -123,6 +153,18 @@ function renderApprovalCard(approval) {
   card.appendChild(buttons);
 
   approvalsList.appendChild(card);
+}
+
+// Cosmetic only -- shows a brief ink-stamp confirmation ("Approved"/"Declined") before the card
+// leaves the DOM, instead of removing it instantly. The decision has already been accepted by the
+// server by the time this runs; this just makes the moment of resolution legible.
+function stampCard(card, decision) {
+  const stamp = document.createElement("div");
+  stamp.className = `approval-stamp ${decision === "approve" ? "is-approve" : "is-deny"}`;
+  stamp.textContent = decision === "approve" ? "Approved" : "Declined";
+  card.appendChild(stamp);
+  card.classList.add("is-resolved");
+  setTimeout(() => card.remove(), 900);
 }
 
 async function resolveApproval(approval, decision, card) {
@@ -134,7 +176,7 @@ async function resolveApproval(approval, decision, card) {
       body: JSON.stringify({ approval_id: approval.approvalId, decision }),
     });
     if (!res.ok) throw new Error(`approve failed: ${res.status}`);
-    card.remove();
+    stampCard(card, decision);
   } catch (err) {
     card.querySelectorAll("button").forEach((b) => (b.disabled = false));
     addBubble("error", `Could not resolve approval: ${err.message}`);
@@ -163,6 +205,7 @@ function handlePendingApproval(event) {
 // product rather than a chat message.
 async function reviewClause(clauseText) {
   reviewOutput.textContent = "Reviewing against the playbook...";
+  reviewOutput.classList.remove("has-redline"); // cosmetic reset of the maroon changebar accent
   flagBanner.hidden = true;
   flagBanner.textContent = "";
   let content = "";
@@ -174,6 +217,9 @@ async function reviewClause(clauseText) {
         switch (event.type) {
           case "tool_call":
             reviewOutput.textContent = `${content}\n\n[${humanizeTool(event.tool_name)}...]`;
+            if (event.tool_name === "propose_redline") {
+              reviewOutput.classList.add("has-redline"); // cosmetic changebar accent
+            }
             if (event.tool_name === "flag_novel_clause") {
               flagBanner.hidden = false;
               flagBanner.textContent = "No playbook match -- flagged for lawyer review.";
@@ -200,6 +246,7 @@ async function reviewClause(clauseText) {
       },
       (sid) => {
         sessionId = sid;
+        updateSessionBadge(sid);
       }
     );
   } catch (err) {
@@ -251,6 +298,7 @@ function askAboutClause(text) {
     },
     (sid) => {
       sessionId = sid;
+      updateSessionBadge(sid);
     }
   ).catch((err) => {
     statusBubble.remove();
@@ -297,6 +345,7 @@ async function sendChatMessage(message) {
       },
       (sid) => {
         sessionId = sid;
+        updateSessionBadge(sid);
       }
     );
   } catch (err) {
