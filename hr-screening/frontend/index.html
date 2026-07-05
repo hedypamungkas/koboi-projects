@@ -2,98 +2,531 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Northstar Talent -- Resume Screening</title>
+  <title>Northstar Talent — Resume Screening</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light dark" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23191a2e'/%3E%3Ctext x='32' y='43' font-family='Georgia,serif' font-size='30' fill='%23ff5a36' text-anchor='middle'%3ENT%3C/text%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;1,9..144,500;1,9..144,600&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <style>
-    :root { color-scheme: light dark; }
+    :root {
+      --ink: #191a2e;
+      --ink-soft: #5c5d78;
+      --ink-faint: #8d8ea6;
+      --paper: #f4f1ea;
+      --paper-raised: #fffdf9;
+      --line: rgba(25, 26, 46, 0.11);
+      --line-strong: rgba(25, 26, 46, 0.22);
+      --accent: #ff5a36;
+      --accent-ink: #ffffff;
+      --accent-wash: rgba(255, 90, 54, 0.1);
+
+      --strong: #1f7a5c;
+      --strong-bg: #e2f2ea;
+      --possible: #9a6b00;
+      --possible-bg: #faf0d8;
+      --weak: #b5432f;
+      --weak-bg: #fbe8e3;
+      --neutral: #8d8ea6;
+      --neutral-bg: #eceafe;
+
+      --radius-lg: 22px;
+      --radius-md: 14px;
+      --radius-sm: 9px;
+      --font-display: "Fraunces", Georgia, serif;
+      --font-body: "Manrope", -apple-system, BlinkMacSystemFont, sans-serif;
+      --shadow-card: 0 1px 2px rgba(25, 26, 46, 0.04), 0 12px 32px -16px rgba(25, 26, 46, 0.18);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --ink: #f0eee6;
+        --ink-soft: #b9b8cc;
+        --ink-faint: #83829a;
+        --paper: #131320;
+        --paper-raised: #1b1c2c;
+        --line: rgba(240, 238, 230, 0.1);
+        --line-strong: rgba(240, 238, 230, 0.22);
+        --accent-wash: rgba(255, 122, 86, 0.14);
+        --strong-bg: rgba(46, 143, 108, 0.16);
+        --possible-bg: rgba(196, 143, 22, 0.16);
+        --weak-bg: rgba(196, 84, 61, 0.18);
+        --neutral-bg: rgba(141, 142, 166, 0.16);
+        --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.2), 0 20px 40px -20px rgba(0, 0, 0, 0.6);
+      }
+    }
+
+    * { box-sizing: border-box; }
+
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      max-width: 960px;
-      margin: 2rem auto;
-      padding: 0 1rem;
-      color: #1a1a1a;
-      background: #fafafa;
+      font-family: var(--font-body);
+      background: var(--paper);
+      color: var(--ink);
+      margin: 0;
+      padding: 3rem 1.5rem 5rem;
+      -webkit-font-smoothing: antialiased;
+      background-image:
+        radial-gradient(circle at 12% -10%, var(--accent-wash), transparent 45%),
+        linear-gradient(var(--paper), var(--paper));
     }
-    h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
-    p.sub { color: #666; margin-top: 0; }
+
+    .wrap { max-width: 1040px; margin: 0 auto; }
+
+    /* ---------- header ---------- */
+    .topbar {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 1.5rem;
+      flex-wrap: wrap;
+      margin-bottom: 2.75rem;
+      animation: rise 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+    }
+    .brand { display: flex; align-items: center; gap: 0.85rem; }
+    .mark {
+      width: 2.6rem;
+      height: 2.6rem;
+      border-radius: 9px;
+      background: var(--ink);
+      color: var(--accent);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 1.15rem;
+      letter-spacing: 0.02em;
+      flex: none;
+    }
+    .brand h1 {
+      font-family: var(--font-display);
+      font-weight: 500;
+      font-size: 1.85rem;
+      line-height: 1.05;
+      margin: 0;
+      letter-spacing: -0.01em;
+    }
+    .brand h1 em { font-style: italic; color: var(--accent); }
+    .eyebrow {
+      text-transform: uppercase;
+      letter-spacing: 0.11em;
+      font-size: 0.68rem;
+      font-weight: 700;
+      color: var(--ink-faint);
+      margin: 0 0 0.3rem;
+    }
+    p.tagline {
+      margin: 0.2rem 0 0;
+      color: var(--ink-soft);
+      font-size: 0.86rem;
+    }
+    .topbar .sub {
+      margin: 0;
+      max-width: 22rem;
+      text-align: right;
+      font-size: 0.82rem;
+      color: var(--ink-faint);
+      line-height: 1.45;
+    }
+    @media (max-width: 700px) { .topbar .sub { text-align: left; } }
+
+    /* ---------- panels ---------- */
     .panel {
-      background: #fff;
-      border: 1px solid #ddd;
-      border-radius: 8px;
-      padding: 1rem 1.25rem;
-      margin-bottom: 1.5rem;
+      background: var(--paper-raised);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      padding: 1.75rem 2rem;
+      margin-bottom: 1.75rem;
+      box-shadow: var(--shadow-card);
+      animation: rise 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
     }
-    .row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+    .panel:nth-of-type(2) { animation-delay: 0.08s; }
+    .panel:nth-of-type(3) { animation-delay: 0.16s; }
+
+    .panel-head h2 {
+      font-family: var(--font-display);
+      font-weight: 500;
+      font-size: 1.25rem;
+      margin: 0 0 0.35rem;
+      letter-spacing: -0.01em;
+    }
+    .panel-head p { margin: 0; color: var(--ink-soft); font-size: 0.88rem; }
+    .panel-head.split {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 1rem;
+      flex-wrap: wrap;
+      margin-bottom: 1.4rem;
+    }
+
+    /* ---------- submit form ---------- */
+    .submit-row {
+      display: flex;
+      align-items: flex-end;
+      gap: 0.9rem;
+      flex-wrap: wrap;
+      margin-top: 1.25rem;
+    }
+    .field { display: flex; flex-direction: column; gap: 0.4rem; }
+    .field label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--ink-faint);
+    }
     input[type="text"] {
-      padding: 0.4rem 0.6rem;
-      border: 1px solid #ccc;
-      border-radius: 4px;
-      min-width: 12rem;
+      font-family: var(--font-body);
+      font-size: 0.98rem;
+      font-weight: 600;
+      padding: 0.65rem 0.9rem;
+      border: 1.5px solid var(--line-strong);
+      border-radius: var(--radius-sm);
+      min-width: 14rem;
+      background: transparent;
+      color: var(--ink);
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
     }
-    button {
-      padding: 0.4rem 0.9rem;
-      border: 1px solid #333;
-      border-radius: 4px;
-      background: #1a1a1a;
-      color: #fff;
+    input[type="text"]:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 4px var(--accent-wash);
+    }
+
+    button.btn-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-family: var(--font-body);
+      font-weight: 700;
+      font-size: 0.92rem;
+      padding: 0.72rem 1.3rem;
+      border: none;
+      border-radius: var(--radius-sm);
+      background: var(--ink);
+      color: var(--paper-raised);
       cursor: pointer;
-      font-size: 0.9rem;
+      transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+      box-shadow: 0 6px 16px -8px rgba(25, 26, 46, 0.5);
     }
-    button.secondary { background: #fff; color: #1a1a1a; }
-    button:disabled { opacity: 0.5; cursor: default; }
-    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
-    th, td { text-align: left; padding: 0.5rem 0.6rem; border-bottom: 1px solid #eee; vertical-align: top; }
-    th { color: #555; font-weight: 600; }
-    .badge {
-      display: inline-block;
-      padding: 0.1rem 0.5rem;
-      border-radius: 999px;
-      font-size: 0.75rem;
+    button.btn-primary:hover:not(:disabled) { background: var(--accent); transform: translateY(-1px); }
+    button.btn-primary:active:not(:disabled) { transform: translateY(0); }
+    button.btn-primary:disabled { opacity: 0.55; cursor: default; transform: none; }
+    button.btn-primary svg { transition: transform 0.15s ease; }
+    button.btn-primary:hover:not(:disabled) svg { transform: translateX(2px); }
+
+    .status-pill {
+      font-size: 0.8rem;
+      color: var(--ink-faint);
       font-weight: 600;
     }
-    .strong_match { background: #e3f9e5; color: #1e7e34; }
-    .possible_match { background: #fff8e1; color: #8a6d00; }
-    .weak_match { background: #fdecea; color: #b71c1c; }
-    .status { font-size: 0.8rem; color: #888; }
-    .decision { font-size: 0.8rem; font-weight: 600; }
-    .rationale { max-width: 26rem; }
-    #log { font-size: 0.8rem; color: #888; margin-top: 0.5rem; white-space: pre-wrap; }
+    .status-pill.is-error { color: var(--weak); }
+    .status-pill.is-ok { color: var(--strong); }
+
+    /* ---------- poll indicator ---------- */
+    .poll-indicator {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--ink-soft);
+    }
+    .pulse-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--strong);
+      position: relative;
+      flex: none;
+    }
+    .pulse-dot::after {
+      content: "";
+      position: absolute;
+      inset: -4px;
+      border-radius: 50%;
+      background: var(--strong);
+      opacity: 0.4;
+      animation: pulse 1.8s ease-out infinite;
+    }
+
+    /* ---------- table ---------- */
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; min-width: 620px; }
+    thead th {
+      text-align: left;
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+      color: var(--ink-faint);
+      padding: 0 0.75rem 0.75rem;
+      border-bottom: 1.5px solid var(--line-strong);
+    }
+    tbody td {
+      padding: 1rem 0.75rem;
+      border-bottom: 1px solid var(--line);
+      vertical-align: middle;
+    }
+    tbody tr:last-child td { border-bottom: none; }
+    tbody tr.result-row { transition: background 0.15s ease; }
+    tbody tr.result-row:hover { background: var(--accent-wash); }
+    tbody tr.row-enter { animation: row-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+    .candidate-cell { display: flex; align-items: center; gap: 0.65rem; }
+    .avatar {
+      width: 2.1rem;
+      height: 2.1rem;
+      border-radius: 50%;
+      background: var(--ink);
+      color: var(--paper-raised);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 0.78rem;
+      flex: none;
+    }
+    .candidate-id { font-weight: 700; letter-spacing: -0.01em; }
+
+    .score-cell { display: flex; align-items: center; }
+    .score-ring {
+      --pct: 0;
+      --ring-color: var(--neutral);
+      width: 2.75rem;
+      height: 2.75rem;
+      border-radius: 50%;
+      background: conic-gradient(var(--ring-color) calc(var(--pct) * 1%), var(--line) 0);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+    }
+    .score-ring::before {
+      content: "";
+      position: absolute;
+      inset: 3.5px;
+      border-radius: 50%;
+      background: var(--paper-raised);
+    }
+    .score-ring span {
+      position: relative;
+      z-index: 1;
+      font-weight: 800;
+      font-size: 0.78rem;
+      font-variant-numeric: tabular-nums;
+    }
+    .score-strong { --ring-color: var(--strong); }
+    .score-possible { --ring-color: var(--possible); }
+    .score-weak { --ring-color: var(--weak); }
+    .score-neutral { --ring-color: var(--neutral); }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.3rem 0.7rem 0.3rem 0.55rem;
+      border-radius: 999px;
+      font-size: 0.74rem;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+      white-space: nowrap;
+    }
+    .badge-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+    .badge-strong { background: var(--strong-bg); color: var(--strong); }
+    .badge-strong .badge-dot { background: var(--strong); }
+    .badge-possible { background: var(--possible-bg); color: var(--possible); }
+    .badge-possible .badge-dot { background: var(--possible); }
+    .badge-weak { background: var(--weak-bg); color: var(--weak); }
+    .badge-weak .badge-dot { background: var(--weak); }
+    .badge-neutral { background: var(--neutral-bg); color: var(--ink-faint); }
+    .badge-neutral .badge-dot { background: var(--ink-faint); }
+
+    .rationale { max-width: 24rem; }
+    .rationale-text {
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      color: var(--ink-soft);
+      line-height: 1.45;
+      font-size: 0.86rem;
+    }
+
+    .decision-actions { display: flex; gap: 0.4rem; }
+    .decision-btn {
+      font-family: var(--font-body);
+      font-size: 0.78rem;
+      font-weight: 700;
+      padding: 0.4rem 0.75rem;
+      border-radius: 999px;
+      cursor: pointer;
+      border: 1.5px solid var(--line-strong);
+      background: transparent;
+      color: var(--ink);
+      transition: all 0.15s ease;
+    }
+    .decision-btn.approve:hover { background: var(--strong); border-color: var(--strong); color: #fff; }
+    .decision-btn.pass:hover { background: var(--weak); border-color: var(--weak); color: #fff; }
+
+    .decision-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      font-size: 0.78rem;
+      font-weight: 700;
+      padding: 0.32rem 0.7rem;
+      border-radius: 999px;
+    }
+    .decision-chip.decision-approve { background: var(--strong-bg); color: var(--strong); }
+    .decision-chip.decision-pass { background: var(--neutral-bg); color: var(--ink-faint); }
+
+    .empty-row td { border-bottom: none; padding: 2.5rem 0.75rem; }
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.5rem;
+      text-align: center;
+      color: var(--ink-faint);
+    }
+    .empty-state .glyph {
+      font-family: var(--font-display);
+      font-style: italic;
+      font-size: 1.6rem;
+      color: var(--ink-faint);
+      opacity: 0.6;
+    }
+    .empty-state p { margin: 0; font-size: 0.86rem; }
+
+    /* ---------- activity log ---------- */
+    details.activity-log {
+      font-size: 0.8rem;
+      color: var(--ink-faint);
+    }
+    details.activity-log summary {
+      cursor: pointer;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      font-size: 0.68rem;
+      color: var(--ink-faint);
+      padding: 0.5rem 0;
+      user-select: none;
+    }
+    details.activity-log summary::-webkit-details-marker { display: none; }
+    details.activity-log summary::before {
+      content: "▸";
+      display: inline-block;
+      margin-right: 0.4rem;
+      transition: transform 0.15s ease;
+    }
+    details.activity-log[open] summary::before { transform: rotate(90deg); }
+    #log {
+      font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+      font-size: 0.76rem;
+      color: var(--ink-faint);
+      white-space: pre-wrap;
+      line-height: 1.6;
+      padding-top: 0.4rem;
+    }
+
+    /* ---------- motion ---------- */
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes row-in {
+      from { opacity: 0; transform: translateY(-4px); background: var(--accent-wash); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes pulse {
+      0% { transform: scale(1); opacity: 0.5; }
+      100% { transform: scale(2.4); opacity: 0; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      * { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
+    }
   </style>
 </head>
 <body>
-  <h1>Northstar Talent -- Resume Screening</h1>
-  <p class="sub">koboi jobs poll dashboard. Every score is advisory only -- recruiters make the call.</p>
+  <div class="wrap">
+    <header class="topbar">
+      <div class="brand">
+        <span class="mark">NT</span>
+        <div>
+          <h1>Northstar <em>Talent</em></h1>
+          <p class="tagline">Resume screening &middot; overnight shortlist</p>
+        </div>
+      </div>
+      <p class="sub">Every score below is advisory only — koboi recommends, your team decides.</p>
+    </header>
 
-  <div class="panel">
-    <div class="row">
-      <input id="resumeId" type="text" placeholder="resume_id (e.g. R-001)" value="R-001" />
-      <button id="submitBtn">Submit for scoring</button>
-      <span id="submitStatus" class="status"></span>
-    </div>
+    <section class="panel submit-panel">
+      <div class="panel-head">
+        <p class="eyebrow">Queue a candidate</p>
+        <h2>Score a resume</h2>
+        <p>Submit a resume ID to queue it against the open requisition. Scoring runs as a background job — no need to wait on this screen.</p>
+      </div>
+      <div class="submit-row">
+        <div class="field">
+          <label for="resumeId">Resume ID</label>
+          <input id="resumeId" type="text" placeholder="R-001" value="R-001" autocomplete="off" spellcheck="false" />
+        </div>
+        <button id="submitBtn" class="btn-primary">
+          <span>Submit for scoring</span>
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M2 8h11M8 3l5 5-5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </button>
+        <span id="submitStatus" class="status-pill"></span>
+      </div>
+    </section>
+
+    <section class="panel results-panel">
+      <div class="panel-head split">
+        <div>
+          <p class="eyebrow">Open requisition</p>
+          <h2>Senior Backend Engineer — shortlist</h2>
+        </div>
+        <div class="poll-indicator">
+          <span class="pulse-dot"></span>
+          <span id="pollStatus">polling…</span>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Candidate</th>
+              <th>Fit score</th>
+              <th>Recommendation</th>
+              <th>Rationale</th>
+              <th>Decision</th>
+            </tr>
+          </thead>
+          <tbody id="resultsBody">
+            <tr class="empty-row">
+              <td colspan="5">
+                <div class="empty-state">
+                  <span class="glyph">Nothing scored yet</span>
+                  <p>Completed jobs will land here automatically — this table polls in the background.</p>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <details class="activity-log">
+      <summary>Activity log</summary>
+      <div id="log"></div>
+    </details>
   </div>
-
-  <div class="panel">
-    <div class="row" style="justify-content: space-between;">
-      <strong>Senior Backend Engineer -- shortlist</strong>
-      <span class="status" id="pollStatus">polling...</span>
-    </div>
-    <table>
-      <thead>
-        <tr>
-          <th>Candidate</th>
-          <th>Score</th>
-          <th>Recommendation</th>
-          <th>Rationale</th>
-          <th>Decision</th>
-        </tr>
-      </thead>
-      <tbody id="resultsBody">
-        <tr><td colspan="5" class="status">No completed jobs yet.</td></tr>
-      </tbody>
-    </table>
-  </div>
-
-  <div id="log"></div>
 
   <script src="app.js"></script>
 </body>

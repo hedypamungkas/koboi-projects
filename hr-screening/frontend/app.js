@@ -30,6 +30,32 @@ const logEl = document.getElementById("log");
 // job_id -> { resume_id, score, rationale, recommendation, decision }
 const rows = new Map();
 
+// job_ids we've already rendered at least once -- lets render() tag only
+// genuinely new rows with the entrance animation instead of replaying it
+// on every 4s poll tick.
+const renderedIds = new Set();
+
+const RECOMMENDATION_META = {
+  strong_match: { label: "Strong match", cls: "strong" },
+  possible_match: { label: "Possible match", cls: "possible" },
+  weak_match: { label: "Weak match", cls: "weak" },
+};
+
+function escapeHtml(value) {
+  const div = document.createElement("div");
+  div.textContent = value == null ? "" : String(value);
+  return div.innerHTML;
+}
+
+// Purely decorative avatar initials derived from the resume_id, e.g.
+// "R-001" -> "R01". Falls back to "?" for unknown/unparsed ids.
+function avatarInitials(resumeId) {
+  if (!resumeId || resumeId === "(unknown)") return "?";
+  const letter = (resumeId.match(/[A-Za-z]+/) || [""])[0].slice(0, 1).toUpperCase();
+  const digits = (resumeId.match(/\d+/) || [""])[0].slice(-2);
+  return `${letter}${digits}` || "?";
+}
+
 function log(msg) {
   const ts = new Date().toLocaleTimeString();
   logEl.textContent = `[${ts}] ${msg}\n` + logEl.textContent;
@@ -57,9 +83,13 @@ async function submitJob() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const body = await res.json();
     submitStatus.textContent = `job ${body.job_id} submitted (${body.status})`;
+    submitStatus.classList.remove("is-error");
+    submitStatus.classList.add("is-ok");
     log(`submitted job ${body.job_id} for ${resumeId}`);
   } catch (err) {
     submitStatus.textContent = `error: ${err.message}`;
+    submitStatus.classList.remove("is-ok");
+    submitStatus.classList.add("is-error");
     log(`submit failed: ${err.message}`);
   } finally {
     submitBtn.disabled = false;
@@ -120,28 +150,49 @@ function setDecision(jobId, decision) {
 
 function render() {
   if (rows.size === 0) {
-    resultsBody.innerHTML = `<tr><td colspan="5" class="status">No completed jobs yet.</td></tr>`;
+    resultsBody.innerHTML = `<tr class="empty-row"><td colspan="5">
+      <div class="empty-state">
+        <span class="glyph">Nothing scored yet</span>
+        <p>Completed jobs will land here automatically — this table polls in the background.</p>
+      </div>
+    </td></tr>`;
     return;
   }
   const sorted = [...rows.values()].sort((a, b) => (b.score || 0) - (a.score || 0));
   resultsBody.innerHTML = sorted
     .map((r) => {
-      const badge = r.recommendation
-        ? `<span class="badge ${r.recommendation}">${r.recommendation.replace("_", " ")}</span>`
-        : "--";
+      const meta = r.recommendation ? RECOMMENDATION_META[r.recommendation] : null;
+      const bandCls = meta ? meta.cls : "neutral";
+      const badge = meta
+        ? `<span class="badge badge-${bandCls}"><span class="badge-dot"></span>${meta.label}</span>`
+        : `<span class="badge badge-neutral"><span class="badge-dot"></span>--</span>`;
+      const hasScore = r.score !== null && r.score !== undefined && r.score !== "";
+      const pct = hasScore ? Math.max(0, Math.min(100, Number(r.score) || 0)) : 0;
+      const scoreCell = `<div class="score-cell">
+        <span class="score-ring score-${bandCls}" style="--pct:${pct}"><span>${hasScore ? Math.round(pct) : "--"}</span></span>
+      </div>`;
       const decision = r.decision
-        ? `<span class="decision">${r.decision === "approve" ? "Approved for interview" : "Passed"}</span>`
-        : `<button class="secondary" onclick="setDecision('${r.job_id}','approve')">Approve for interview</button>
-           <button class="secondary" onclick="setDecision('${r.job_id}','pass')">Pass</button>`;
-      return `<tr>
-        <td>${r.resume_id}</td>
-        <td>${r.score ?? "--"}</td>
+        ? `<span class="decision-chip decision-${r.decision}">${r.decision === "approve" ? "Approved for interview" : "Passed"}</span>`
+        : `<div class="decision-actions">
+             <button class="decision-btn approve" onclick="setDecision('${r.job_id}','approve')">Approve</button>
+             <button class="decision-btn pass" onclick="setDecision('${r.job_id}','pass')">Pass</button>
+           </div>`;
+      const isNew = !renderedIds.has(r.job_id) ? " row-enter" : "";
+      return `<tr class="result-row${isNew}">
+        <td>
+          <div class="candidate-cell">
+            <span class="avatar">${escapeHtml(avatarInitials(r.resume_id))}</span>
+            <span class="candidate-id">${escapeHtml(r.resume_id)}</span>
+          </div>
+        </td>
+        <td>${scoreCell}</td>
         <td>${badge}</td>
-        <td class="rationale">${r.rationale}</td>
+        <td class="rationale"><span class="rationale-text">${escapeHtml(r.rationale)}</span></td>
         <td>${decision}</td>
       </tr>`;
     })
     .join("");
+  sorted.forEach((r) => renderedIds.add(r.job_id));
 }
 
 // Expose for inline onclick handlers.
