@@ -27,6 +27,10 @@ function addBubble(kind, text) {
   const el = document.createElement("div");
   el.className = `bubble ${kind}`;
   el.textContent = text;
+  // Cosmetic only -- a data attribute survives later `textContent +=` updates
+  // (unlike child nodes would), so streamed agent bubbles can still show a
+  // timestamp via CSS `content: attr(data-time)` without touching the text.
+  el.dataset.time = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   chatLog.appendChild(el);
   chatLog.scrollTop = chatLog.scrollHeight;
   return el;
@@ -79,14 +83,55 @@ async function streamChat(message, onEvent, onSessionId) {
   }
 }
 
+// Parses sendMessage()'s summary string ("Refund $12.34 -- order 10234
+// (damaged in transit)") into parts for a nicer ticket layout. Purely a
+// display concern -- if the format ever changes, parsed stays null and
+// renderApprovalCard falls back to showing the raw summary untouched.
+function parseApprovalSummary(summary) {
+  const m = /^Refund \$([\d.,]+) -- order (\S+) \((.+)\)$/.exec(summary || "");
+  if (!m) return null;
+  // orderId may already carry a leading '#' (the model often passes "#10234");
+  // strip it here so the single '#' the template adds back doesn't become '##'.
+  return { amount: m[1], orderId: m[2].replace(/^#/, ""), reason: m[3] };
+}
+
 function renderApprovalCard(approval) {
   const card = document.createElement("div");
   card.className = "approval-card";
   card.dataset.approvalId = approval.approvalId;
 
-  const label = document.createElement("span");
-  label.textContent = approval.summary;
-  card.appendChild(label);
+  const parsed = parseApprovalSummary(approval.summary);
+
+  if (parsed) {
+    const top = document.createElement("div");
+    top.className = "ticket-top";
+
+    const tag = document.createElement("span");
+    tag.className = "ticket-tag";
+    tag.textContent = "Refund request";
+    top.appendChild(tag);
+
+    const order = document.createElement("span");
+    order.className = "ticket-order";
+    order.textContent = `#${parsed.orderId}`;
+    top.appendChild(order);
+
+    card.appendChild(top);
+
+    const amount = document.createElement("div");
+    amount.className = "ticket-amount";
+    amount.textContent = `$${parsed.amount}`;
+    card.appendChild(amount);
+
+    const reason = document.createElement("p");
+    reason.className = "ticket-reason";
+    reason.textContent = parsed.reason;
+    card.appendChild(reason);
+  } else {
+    const label = document.createElement("span");
+    label.textContent = approval.summary;
+    card.appendChild(label);
+  }
 
   const buttons = document.createElement("div");
   buttons.className = "buttons";
@@ -213,3 +258,7 @@ chatForm.addEventListener("submit", (e) => {
     chatInput.focus();
   });
 });
+
+// Cosmetic: land the cursor in the chat box on load, matching a real
+// storefront widget that greets you ready to type.
+chatInput.focus();
