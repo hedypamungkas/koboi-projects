@@ -73,6 +73,16 @@ const messagesEl = document.getElementById("messages");
 const form = document.getElementById("composer");
 const input = document.getElementById("input");
 const sendBtn = document.getElementById("send");
+// Polite live region announced by screen readers. See the comment in
+// index.html for why the streamed reply is announced here (once, when
+// complete) rather than by making #messages itself a live region.
+const srStatusEl = document.getElementById("sr-status");
+
+function announce(text) {
+  // Overwrite so aria-atomic re-reads the whole message; a blank-then-set is
+  // unnecessary because each reply is a distinct, self-contained utterance.
+  if (srStatusEl) srStatusEl.textContent = text;
+}
 
 function addBubble(role, text) {
   const el = document.createElement("div");
@@ -108,9 +118,11 @@ form.addEventListener("submit", async (evt) => {
         // authoritative text; it can differ from what streamed live.
         assistantBubble.textContent = event.content;
         assistantBubble.classList.remove("pending");
+        announce(event.content);
       } else if (event.type === "error") {
         assistantBubble.remove();
         addBubble("error", `Something went wrong: ${event.error}`);
+        announce(`Something went wrong: ${event.error}`);
       }
       // tool_call / tool_result (flag_urgent_escalation) intentionally have no
       // UI treatment -- the patient never sees "you've been flagged"; that's
@@ -119,6 +131,7 @@ form.addEventListener("submit", async (evt) => {
   } catch (err) {
     assistantBubble.remove();
     addBubble("error", `Something went wrong: ${err.message}`);
+    announce(`Something went wrong: ${err.message}`);
   } finally {
     input.disabled = false;
     sendBtn.disabled = false;

@@ -117,6 +117,20 @@
     background: #9db3b7;
     cursor: not-allowed;
   }
+  /* Visually hidden but exposed to assistive tech. Used for the polite
+     live region that announces the assistant's completed reply. */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    border: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
 </style>
 </head>
 <body>
@@ -127,8 +141,16 @@
        emergency, call your local emergency number now instead of using this chat.</p>
   </header>
   <div class="disclaimer">Demo application -- not a real clinic, not medical advice.</div>
-  <main id="messages"></main>
+  <main id="messages" aria-label="Intake conversation"></main>
+  <!-- Polite live region. The visual #messages container is deliberately NOT a
+       live region: the assistant reply streams in token-by-token via
+       `textContent +=`, and announcing every mutation would spam a screen
+       reader with the same growing sentence. Instead, only the final,
+       guardrail-checked reply (and any error) is written here once, so a screen
+       reader user hears the complete grounded answer exactly one time. -->
+  <div id="sr-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
   <form id="composer">
+    <label class="sr-only" for="input">Your answer</label>
     <textarea id="input" rows="1" placeholder="Type your answer..." autofocus></textarea>
     <button id="send" type="submit">Send</button>
   </form>
