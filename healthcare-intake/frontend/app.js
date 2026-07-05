@@ -73,6 +73,15 @@ const messagesEl = document.getElementById("messages");
 const form = document.getElementById("composer");
 const input = document.getElementById("input");
 const sendBtn = document.getElementById("send");
+const srStatus = document.getElementById("sr-status");
+
+// Announces text to screen readers exactly once via the visually-hidden
+// #sr-status live region -- used only for the final "complete"/"error"
+// event, never per streamed token (see index.html's comment on #sr-status
+// for why the visible #messages container isn't itself a live region).
+function announce(text) {
+  if (srStatus) srStatus.textContent = text;
+}
 
 function addBubble(role, text) {
   const el = document.createElement("div");
@@ -92,6 +101,7 @@ form.addEventListener("submit", async (evt) => {
 
   addBubble("patient", text);
   input.value = "";
+  autoResizeTextarea();
   input.disabled = true;
   sendBtn.disabled = true;
 
@@ -108,9 +118,11 @@ form.addEventListener("submit", async (evt) => {
         // authoritative text; it can differ from what streamed live.
         assistantBubble.textContent = event.content;
         assistantBubble.classList.remove("pending");
+        announce(event.content);
       } else if (event.type === "error") {
         assistantBubble.remove();
         addBubble("error", `Something went wrong: ${event.error}`);
+        announce(`Something went wrong: ${event.error}`);
       }
       // tool_call / tool_result (flag_urgent_escalation) intentionally have no
       // UI treatment -- the patient never sees "you've been flagged"; that's
@@ -132,3 +144,13 @@ input.addEventListener("keydown", (evt) => {
     form.requestSubmit();
   }
 });
+
+// Purely cosmetic: grow the textarea as the patient types (capped by the
+// max-height set in index.html's CSS), so short answers don't feel cramped
+// and longer ones don't force a scrollbar too soon. Doesn't touch the
+// streaming/session logic above.
+function autoResizeTextarea() {
+  input.style.height = "auto";
+  input.style.height = `${input.scrollHeight}px`;
+}
+input.addEventListener("input", autoResizeTextarea);
