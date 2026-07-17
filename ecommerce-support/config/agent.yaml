@@ -38,6 +38,11 @@ rag:
   chunker: paragraph
   retriever: hybrid
   top_k: 8
+  # koboi 0.18+ embedding cache so a container restart doesn't re-embed the seed
+  # policy/FAQ docs (rag.embedding_cache_path). Verified active at runtime: the
+  # cache file is written on first run. (rag.document_cache_path only caches
+  # *remote* URL fetches, so it is inert for these local seed files -- omitted.)
+  embedding_cache_path: /data/rag_embedding_cache.json
   documents:
     - path: "/app/data/seed/return_policy.md"
     - path: "/app/data/seed/shipping_faq.md"

@@ -91,7 +91,13 @@ class PHIRedactionGuardrail(PatternGuardrail):
         kwargs.pop("default_action", None)
         super().__init__(patterns=patterns, default_action=self.DEFAULT_ACTION, **kwargs)
 
-    async def check(self, content: str) -> GuardrailResult:
+    async def check(self, content: str, context: list[str] | None = None) -> GuardrailResult:
+        # ``context`` (the retrieved RAG chunk strings, output path only) was added to
+        # ``BaseGuardrail.check`` in koboi 0.18.x -- the caller now passes it as a kwarg,
+        # so every override MUST accept it (a bare ``check(self, content)`` raises
+        # TypeError and ends the stream with an ``error`` event). This guardrail redacts
+        # the model's *output* for PHI, so ``context`` isn't used here -- it just has to
+        # be in the signature to satisfy the base contract.
         if not content:
             return GuardrailResult(passed=True)
 

@@ -38,9 +38,13 @@ against `server.allowed_modes`; jobs can never run in `yolo` mode, no matter wha
 **A naming collision worth knowing before you configure anything:** "chat" here means the *transport*
 (`/v1/chat/stream`, a live SSE conversation). But `mode` is a *different* thing — koboi's own permission
 level (`chat`/`plan`/`act`/`auto`/`yolo`), and `AgentMode.CHAT` is a locked-down, read-only mode that blocks
-every custom tool by name, regardless of its risk level. **Any app with a custom tool needs `agent.mode: act`
-as its config default** — even one that only ever talks over the interactive chat transport. Reserve
-`chat`/`plan` for an agent with zero custom tools. Every app in this repo sets `agent.mode: act`.
+every custom tool by name, regardless of its risk level. An app with a custom tool picks one of two routes:
+set `agent.mode: act` (every tool may run; `MODERATE`/`DESTRUCTIVE` tools still pause for human approval),
+**or** keep a `chat`/`plan` default and allowlist its SAFE custom tools via `mode.read_only_tools: [...]` —
+the escape hatch koboi 0.18+ added to ModeHook's built-in read-only set (wired in `hooks/registry.py`). Use
+`act` when any custom tool is `MODERATE`/`DESTRUCTIVE`; a bare `chat` default fits an agent whose custom tools
+are all SAFE. Most apps in this repo use `act`; healthcare is the SAFE-only exception and runs in `chat` +
+`mode.read_only_tools` (see its README).
 
 ## 3. Streaming to the browser
 
@@ -119,9 +123,11 @@ Point your Dockerfile's `CMD` at this script instead of `koboi serve`. Inside th
 `ctx.tool_arguments` arrives as a **JSON string**, not a dict — `json.loads()` it before reading a field.
 
 **Note on MCP tools specifically:** if you connect koboi to an MCP server (yours or a vendor's) instead of
-writing a local `@tool()`, every tool that server exposes comes in as `SAFE` — koboi has no way to mark an
-MCP tool `DESTRUCTIVE` today. Fine for read-only lookups; keep anything that writes/changes data as a local
-`@tool()` so it still gets the approval pause. The finance doc shows exactly this split.
+writing a local `@tool()`, that server's tools default to `SAFE` — but koboi 0.18+ can risk-gate the whole
+server via `mcp.servers[].risk_level`, or infer per-tool risk with `risk_heuristic: true` (a non-SAFE level
+then gates when `guardrails.approval` or `policy.rules` is configured). Read-only lookups are fine as MCP;
+for the one operation a human must approve, a local `@tool()` carrying `RiskLevel.DESTRUCTIVE` is still the
+most direct way to get the approval pause. The finance doc shows exactly this split.
 
 ## 6. Guardrails you get without writing code
 
@@ -218,7 +224,9 @@ server:
   start a job at all on the default `passthrough` sandbox — this isn't optional hardening, it's a hard
   requirement for `POST /v1/jobs` to work. Design anything a job does to be safe unattended, or route the
   risky step into chat mode instead.
-- **No webhooks.** Jobs are checked by polling or streaming, not pushed to you.
+- **Webhooks are opt-in.** koboi 0.18+ can POST an HMAC-signed (`X-Koboi-Signature`) payload to a
+  `jobs.webhooks[]` URL when a job reaches a terminal status; otherwise poll `GET /v1/jobs/{id}` or tail
+  `/v1/jobs/{id}/stream`. None of the apps in this repo wire one up.
 - **Files live per-session and expire** (24h default) — nothing is a permanent file store.
 
 That's the whole contract. Everything past this point in each sector doc is what makes that business

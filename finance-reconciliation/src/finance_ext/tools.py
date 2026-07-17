@@ -3,9 +3,11 @@
 ``post_journal_entry`` posts an approved amount to the general ledger. It is
 kept as a local ``@tool()`` (rather than pulled in over MCP, like the
 read-only ERP lookups) specifically so it can carry ``RiskLevel.DESTRUCTIVE``
--- MCP tools always come in as SAFE, with no way to mark one DESTRUCTIVE, so
-the one operation Ledgerline's controller must approve by hand has to live
-here instead of in ``erp_mcp_server.py``.
+and always hit koboi's human-approval pause. MCP tools default to SAFE
+(koboi 0.18+ can risk-gate a whole server via ``mcp.servers[].risk_level``,
+but a local ``@tool()`` is still the most direct way to mark this one write
+DESTRUCTIVE), so the operation Ledgerline's controller must approve by hand
+lives here instead of in ``erp_mcp_server.py``.
 """
 
 from koboi.tools.registry import tool

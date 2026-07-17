@@ -211,7 +211,8 @@ server:
 ```
 
 `post_journal_entry`'s `DESTRUCTIVE` risk level, not a YAML flag, is what makes chat mode pause for approval
-— the three `erp-mcp` tools always come in as `SAFE`. `allowed_modes` just says which modes a request may
+— the three `erp-mcp` tools default to `SAFE` (koboi 0.18+ *can* risk-gate an MCP server via
+`mcp.servers[].risk_level`, but these are read-only by design). `allowed_modes` just says which modes a request may
 ask for (`act` for the job, `chat` for the controller); `agent.mode: act` is the default a request gets when
 it doesn't specify one, and it's what lets the controller's chat session actually call `three_way_match` and
 `post_journal_entry` at all.
@@ -222,7 +223,7 @@ Two lessons show up together here. First, koboi plugs into infrastructure Ledger
 every consumer writing its own ERP wrapper — `erp-mcp` exists because other internal tools want the same read
 access, and koboi is just one more client, an `mcp.servers` entry instead of custom API glue. Second, and the
 more interesting design call: keeping `post_journal_entry` local instead of pulling it in over MCP too is
-deliberate, not a caveat — MCP tools are always `SAFE`, so the one write that matters stays local,
+deliberate, not a caveat — MCP tools default to `SAFE`, so the one write that matters stays local,
 `DESTRUCTIVE`, and approval-gated, while everything read-only rides on shared infrastructure. Shared read
 access plus a protected write path is the realistic shape of most finance integrations.
 

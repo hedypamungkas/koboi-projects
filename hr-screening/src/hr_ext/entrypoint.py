@@ -6,7 +6,7 @@ custom hooks -- only tools/RAG/context support that (`tools.custom`,
 `koboi.server.app.create_app(config, extra_hooks=[...])` instead, which means
 this app needs its own small entrypoint rather than the bare `koboi serve`.
 
-Verified against the installed koboi-agent==0.2.0 wheel
+Verified against the installed koboi-agent==0.18.2 wheel
 (`koboi/server/app.py::create_app`):
 
     def create_app(

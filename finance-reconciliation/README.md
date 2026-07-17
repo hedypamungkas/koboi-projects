@@ -8,8 +8,9 @@ what's specific to running this build, plus the deliberate simplifications made 
 ## What this demonstrates
 
 - **MCP as a client** -- koboi connects to `erp_mcp_server.py`, which exposes three read-only ERP lookups
-  (`fetch_invoice`, `fetch_purchase_order`, `three_way_match`). All three come in as `RiskLevel.SAFE`
-  automatically -- koboi has no way to mark an MCP tool `DESTRUCTIVE`.
+  (`fetch_invoice`, `fetch_purchase_order`, `three_way_match`). All three default to `RiskLevel.SAFE`
+  (koboi 0.18+ *can* risk-gate an MCP server via `mcp.servers[].risk_level`, but these are read-only on
+  purpose, so SAFE is correct).
 - **A local DESTRUCTIVE tool** -- `post_journal_entry` (`src/finance_ext/tools.py`) is the one write, kept
   local on purpose so it can carry `RiskLevel.DESTRUCTIVE` and trigger koboi's built-in human-approval pause.
 - **A custom hook** -- `InvoiceAuditHook` (`src/finance_ext/hooks.py`) logs every `PRE_TOOL_USE` /

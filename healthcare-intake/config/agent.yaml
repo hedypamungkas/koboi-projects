@@ -6,15 +6,16 @@
 
 agent:
   name: "patient-intake"
-  # NOT "chat" -- verified live (see README "Deviations from the spec docs" #0):
-  # koboi/hooks/mode_hook.py hardcodes a read-only tool allowlist for CHAT/PLAN
-  # mode, and flag_urgent_escalation (a custom tool) isn't on it, so CHAT mode
-  # silently mode-blocks the escalation call regardless of its SAFE risk level.
-  # ACT mode allows all tools, and because this tool is SAFE, koboi's
-  # AsyncCallbackApprovalHandler auto-approves it with no human-in-the-loop
-  # pause -- so the patient-facing behavior is identical to what "chat mode"
-  # was meant to convey: a live conversation, no approval UI.
-  mode: act
+  # "chat" -- the intent here is genuinely a live, read-only patient conversation.
+  # koboi 0.18+ added mode.read_only_tools: it extends ModeHook's built-in
+  # read-only allowlist so a SAFE custom tool (here: flag_urgent_escalation) is
+  # permitted in CHAT/PLAN without forcing the whole agent into ACT mode. The
+  # tool is SAFE, so AsyncCallbackApprovalHandler auto-approves it with no
+  # human-in-the-loop pause -- patient-facing behavior is identical to the old
+  # mode:act workaround, but the mode now correctly reflects "live chat".
+  # (Pre-0.18, the only way to let this SAFE tool run was mode: act; the README
+  # "Deviations" section records the history.)
+  mode: chat
   system_prompt: |
     You conduct a pre-visit patient intake conversation for Riverside Family Clinic. Ask about
     symptoms, duration, severity, and relevant history, following the clinic's own intake
@@ -25,6 +26,14 @@ agent:
     seek immediate or emergency care. For routine, non-urgent symptoms, do not call the tool --
     just continue the intake and let the patient know the care team will review their answers
     before the visit.
+
+# koboi 0.18+ escape hatch (top-level `mode:` section): allowlist the one SAFE
+# custom tool so it actually runs in CHAT mode. Wired in koboi/hooks/registry.py
+# -> ModeHook(extra_read_only=...); without this, CHAT/PLAN block every custom
+# tool by name regardless of risk level.
+mode:
+  read_only_tools:
+    - flag_urgent_escalation
 
 llm:
   provider: "openai"
@@ -47,6 +56,11 @@ embedding:
 rag:
   enabled: true
   retriever: hybrid
+  # koboi 0.18+ embedding cache so a container restart doesn't re-embed the seed
+  # protocol docs (rag.embedding_cache_path). Verified active at runtime: the
+  # cache file is written on first run. (rag.document_cache_path only caches
+  # *remote* URL fetches, so it is inert for these local seed files -- omitted.)
+  embedding_cache_path: /data/rag_embedding_cache.json
   documents:
     - path: "/app/data/seed/red_flag_symptoms.md"
     - path: "/app/data/seed/intake_questions.md"
@@ -68,10 +82,11 @@ context:
 
 server:
   auth_required: false   # simplified for this local smoke-test POC -- would be true in production
-  # "act", matching agent.mode above -- "chat" is deliberately not offered as a
-  # per-request override here since it would silently mode-block
-  # flag_urgent_escalation (see the comment on agent.mode).
-  allowed_modes: [act]
+  # agent.mode is "chat" (above); "act" remains available as a per-request
+  # override. With flag_urgent_escalation allowlisted via mode.read_only_tools,
+  # CHAT no longer mode-blocks the escalation call -- so "chat" is now safe to
+  # offer and is the correct default for a live patient conversation.
+  allowed_modes: [chat, act]
   cors:
     # Required for the browser-based frontend (served on a different port) to
     # call this API directly; koboi only adds CORS middleware when this block
