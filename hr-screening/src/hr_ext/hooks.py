@@ -12,7 +12,7 @@ group for custom hooks (only tools/RAG/context support `custom_modules` /
 see `hr_ext/entrypoint.py`.
 
 NOTE on `ctx.tool_arguments`: verified against the installed `koboi.hooks.chain`
-(v0.2.0) -- `HookContext.tool_arguments` is the *raw JSON string* the LLM
+(v0.18.2) -- `HookContext.tool_arguments` is the *raw JSON string* the LLM
 produced for the tool call (mirrors `koboi.types.ToolCall.arguments: str`), not
 a parsed dict. It must be `json.loads`-ed here.
 """

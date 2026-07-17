@@ -7,9 +7,12 @@ agent:
     explicitly approves a posting -- it will pause for human approval automatically because
     it is a destructive, ledger-writing action.
   max_iterations: 10
-  # Default mode must be "act": ModeHook blocks every custom/MCP tool by name
-  # in chat/plan mode regardless of risk level, so without this the app only
-  # works when a caller happens to pass "mode":"act" per-request.
+  # Default mode is "act" because post_journal_entry is DESTRUCTIVE and must stay
+  # executable -- CHAT/PLAN block every non-read-only tool by name (ModeHook).
+  # The read-only ERP lookups are SAFE and could alternatively be allowlisted via
+  # mode.read_only_tools to run in chat, but act is required here regardless
+  # because of the destructive write, so the controller's chat session can call
+  # three_way_match and post_journal_entry without a per-request mode override.
   mode: act
 
 llm:

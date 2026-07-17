@@ -35,6 +35,11 @@ const rows = new Map();
 // on every 4s poll tick.
 const renderedIds = new Set();
 
+// Signature of the last rendered table ("job_id:decision" joined in render order). render() skips
+// the full innerHTML rebuild when this is unchanged, so steady-state 4s polls don't destroy and
+// recreate rows/buttons — click targets stay stable between a snapshot and a click.
+let lastRenderSig = "";
+
 const RECOMMENDATION_META = {
   strong_match: { label: "Strong match", cls: "strong" },
   possible_match: { label: "Possible match", cls: "possible" },
@@ -149,6 +154,14 @@ function setDecision(jobId, decision) {
 }
 
 function render() {
+  const sorted = rows.size === 0 ? [] : [...rows.values()].sort((a, b) => (b.score || 0) - (a.score || 0));
+  // Skip the rebuild when nothing changed since the last render. The table polls every 4s and a
+  // full innerHTML rebuild each tick destroys/recreates every <tr> and button, so an in-flight
+  // Approve/Pass click could land on a detached node. Logical state (incl. each row's decision)
+  // lives in the `rows` Map, so re-rendering only on actual change keeps the DOM stable.
+  const sig = sorted.map((r) => `${r.job_id}:${r.decision ?? ""}`).join("|");
+  if (sig === lastRenderSig) return;
+  lastRenderSig = sig;
   if (rows.size === 0) {
     resultsBody.innerHTML = `<tr class="empty-row"><td colspan="5">
       <div class="empty-state">
@@ -158,7 +171,6 @@ function render() {
     </td></tr>`;
     return;
   }
-  const sorted = [...rows.values()].sort((a, b) => (b.score || 0) - (a.score || 0));
   resultsBody.innerHTML = sorted
     .map((r) => {
       const meta = r.recommendation ? RECOMMENDATION_META[r.recommendation] : null;

@@ -42,7 +42,7 @@ disable-model-invocation: false
 ## Acceptable variants
 - Mutual indemnification, capped at total fees paid under the contract
 
-## Unacceptable variants (escalate, do not draft a redline)
+## Unacceptable variants (propose the fallback redline below)
 - Uncapped or one-sided indemnification
 
 ## Fallback language

@@ -82,12 +82,23 @@ memory:
 sandbox:
   backend: restricted
   workdir: /data/workspace
-  workdir_strategy: per_session
+  # NOTE: `workdir_strategy: per_session` was removed in koboi-agent 0.18.x
+  # (commit 1c25749 "remove dead fields"). Per-session workdir isolation is now
+  # automatic -- koboi/server/pool.py:AgentPool._build_agent derives a per-session
+  # workdir (workspace_root/<session_id>) and overrides `sandbox.workdir` at agent
+  # build time, so the strategy knob became dead config and the SandboxConfig
+  # schema now rejects unknown keys (would crash `koboi serve` at startup).
   network: deny
 
 jobs:
   enabled: true
   max_concurrent: 5
+  # koboi 0.18+ knobs: resume_on_startup defaults to true (an interrupted nightly
+  # batch resumes instead of being lost on a container restart); timeout_seconds
+  # caps a single nightly batch's wall clock -- the delegate_tasks fan-out over
+  # several listings can run a while, so leave the roomy default.
+  resume_on_startup: true
+  timeout_seconds: 1800
 
 server:
   enabled: true

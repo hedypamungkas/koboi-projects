@@ -11,13 +11,17 @@ disable-model-invocation: false
   for confidentiality breaches, indemnification obligations, and gross negligence/willful
   misconduct
 
-## Unacceptable variants (escalate, do not draft a redline)
+## Unacceptable variants (propose the fallback redline below)
 - One-sided liability cap that only protects the counterparty
 - No cap on liability at all ("uncapped liability")
 - A cap set below one month of fees, or below a fixed floor the firm considers too low to be
   meaningful
 - Liability exclusions that also try to disclaim the counterparty's indemnification or
   confidentiality obligations
+
+For any variant here, call the `propose_redline` tool with the fallback language below (it pauses for
+lawyer approval before drafting the redline). Use `flag_novel_clause` only when NO playbook category
+matches the clause at all.
 
 ## Fallback language
 "Except for breaches of confidentiality, indemnification obligations, or gross negligence or

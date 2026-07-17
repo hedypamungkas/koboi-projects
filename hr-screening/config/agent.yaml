@@ -1,5 +1,5 @@
 # hr-screening agent config -- runs as jobs (POST /v1/jobs), not chat.
-# Field names verified against the installed koboi-agent==0.2.0
+# Field names verified against the installed koboi-agent==0.18.2
 # koboi/config_models.py (AgentConfig, LLMConfig, ToolsConfig, JobsConfig,
 # ServerConfig, MemoryConfig).
 
@@ -57,6 +57,12 @@ sandbox:
 jobs:
   enabled: true
   max_concurrent: 5
+  # koboi 0.18+ knobs: resume_on_startup now defaults to true (a scoring run in
+  # flight survives a container restart -- the /data memory file above is what
+  # lets it); timeout_seconds caps a single job's wall clock (default 1800s is
+  # far more than one resume needs, so cap it tighter here).
+  resume_on_startup: true
+  timeout_seconds: 600
 
 server:
   auth_required: false # simplified for this local smoke-test POC -- would be `true` (with real API keys) in production

@@ -23,7 +23,7 @@ describes.
 
 `koboi serve <config>` has no YAML key or entry-point group for custom **hooks** --
 `tools.custom` and `rag.custom_modules` / `context.custom_modules` exist, but hooks don't. The
-real way in, verified against the real PyPI `koboi-agent==0.4.0` package
+real way in, verified against the real PyPI `koboi-agent==0.18.2` package
 (`koboi/server/app.py::create_app`), is:
 
 ```python

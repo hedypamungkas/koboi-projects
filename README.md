@@ -30,7 +30,7 @@ Skills, and parallel task fan-out each show up where they're the natural fit, no
 
 ## Status
 
-**All six are built and running, each installing `koboi-agent[api]==0.4.0` straight from PyPI** — no git
+**All six are built and running, each installing `koboi-agent[api]==0.18.2` straight from PyPI** — no git
 checkout, no local wheel, nothing vendored into this repo. Every project directory has its own
 `docker-compose.yml`, `README.md` with exact run/smoke-test steps, and a "Deviations" section documenting
 where the real `koboi-agent` behavior differed from the design doc's sketch (a handful of real gaps only

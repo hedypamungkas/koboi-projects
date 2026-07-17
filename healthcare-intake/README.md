@@ -47,33 +47,25 @@ Both `docs/04` and the original task brief describe an idealized config; a few o
 match what `koboi/config_models.py` actually validates, or what the running server actually does. Each
 was checked against the source before writing `config/agent.yaml` / `frontend/app.js`:
 
-0. **`agent.mode: chat` cannot run `flag_urgent_escalation` at all -- this is the big one.**
+0. **`agent.mode: chat` + `mode.read_only_tools` (resolved in koboi 0.18+).**
    Both `docs/04` and the task brief specify `mode: chat` ("never act or yolo -- this is a live
-   conversation with a patient"). Live-tested against the real server: sending a clear red-flag message
-   (chest pain + shortness of breath) in `chat` mode produced a `tool_call` event followed immediately by
-   `tool_result: "Error: CHAT mode: tool 'flag_urgent_escalation' is not allowed. Switch to ACT or AUTO
-   mode to execute state-changing tools."` -- the escalation silently never happened, and
-   `/data/escalations.log` stayed empty even for a textbook emergency. Root cause:
-   `koboi/hooks/mode_hook.py`'s `ModeHook._on_pre_tool_use` hardcodes a `_READ_ONLY_TOOLS` allowlist
-   (`read`, `search`, `grep`, `find`, `list`, `glob`, `web_search`, `web_fetch`, `calculator`,
-   `delegate_tasks`) for CHAT/PLAN mode -- any tool not on that list is mode-blocked in
-   `loop_pipeline.py`'s `execute_tool_call` step 5, **regardless of its `RiskLevel`**. There's no
-   config/plugin extension point for that allowlist, so a `SAFE` custom tool genuinely cannot run in chat
-   mode; this isn't fixable from a consuming app without patching koboi core, which is out of scope here.
-   **Fix:** `agent.mode: act` and `server.allowed_modes: [act]`. This is safe for the patient-facing
-   behavior doc/04 actually wants: ACT mode's `ModeHook` path allows all tools ("permission dialog handles
-   approval"), and because `flag_urgent_escalation` is `SAFE` risk, `AsyncCallbackApprovalHandler`
-   (`koboi/guardrails/approval.py`, `auto_approve_safe=True` by default) auto-approves it with **no**
-   human-in-the-loop pause -- verified live: no `pending_approval` event appeared, the tool executed
-   immediately, and the patient never saw anything about the escalation. Since this app registers no
-   `filesystem`/`shell` tools, ACT mode's broader `allow_file_write`/`allow_shell` flags are moot -- there's
-   nothing for the model to do with that permission. Net effect for the patient: identical to what "chat
-   mode" was meant to convey. `chat` is deliberately *not* included in `server.allowed_modes` as a
-   selectable per-request override, since offering it would look fine but silently defeat escalation.
-   Minor, purely cosmetic side effect: ACT mode's injected system-prompt suffix says "You may modify files
-   and run shell commands" (`koboi/modes.py`), which is untrue for this app -- harmless in practice since
-   no such tools are registered for the model to (mis)use, but worth knowing it's there if you inspect the
-   prompt.
+   conversation with a patient"). Originally built against koboi 0.4.0, chat mode could not run
+   `flag_urgent_escalation` at all: live-tested, a clear red-flag message (chest pain + shortness of
+   breath) in `chat` mode produced a `tool_result: "Error: CHAT mode: tool 'flag_urgent_escalation' is
+   not allowed..."` -- the escalation silently never happened and `/data/escalations.log` stayed empty
+   even for a textbook emergency. Root cause: `koboi/hooks/mode_hook.py`'s `ModeHook` blocks every tool
+   not on a hardcoded `_READ_ONLY_TOOLS` allowlist (`read`, `search`, `grep`, `find`, `list`, `glob`,
+   `web_search`, `web_fetch`, `calculator`, `delegate_tasks`) in CHAT/PLAN, **regardless of its
+   `RiskLevel`**. At 0.4.0 there was no extension point for that allowlist, so the workaround was
+   `agent.mode: act` + `server.allowed_modes: [act]` (SAFE risk + `auto_approve_safe=True` meant no
+   human-in-the-loop pause, so patient-facing behavior matched what "chat" was meant to convey).
+   **koboi 0.18+ resolved this:** the top-level `mode.read_only_tools` list extends ModeHook's read-only
+   set (wired in `hooks/registry.py` -> `ModeHook(extra_read_only=...)`). We now run the originally-
+   intended `agent.mode: chat` with `mode.read_only_tools: [flag_urgent_escalation]` and
+   `server.allowed_modes: [chat, act]`. Behavior is identical to the old act workaround at the tool level
+   (SAFE tool, auto-approved, no `pending_approval`), but the mode now correctly reflects a live, read-only
+   intake conversation -- and it drops the cosmetic ACT-mode system-prompt suffix ("you may modify files
+   and run shell commands") that was untrue for this app.
 
 1. **`rag.corpus_path` doesn't exist.** `docs/04`'s sample config uses `rag.corpus_path: ./data/seed`,
    but `RagConfig` (config_models.py) has no such field -- it has `documents: list[str | dict]`, each a
@@ -102,6 +94,16 @@ was checked against the source before writing `config/agent.yaml` / `frontend/ap
    (`guardrails.output: {detect_sensitive: true}` with no `name` at all, which never wires the custom
    guardrail in at all) -- worth flagging since it would have silently defeated the whole point of
    writing `PHIRedactionGuardrail`.
+
+2b. **`PHIRedactionGuardrail.check()` must accept a `context` kwarg (koboi 0.18+).** Surfaced by a real
+   end-to-end test after the 0.18.2 bump: `BaseGuardrail.check(self, content, context: list[str] | None)`
+   gained a `context` parameter (the retrieved RAG chunk strings, output path only), and the output
+   pipeline now passes it as a keyword arg. Our override was `async def check(self, content)` -- so every
+   reply ended the SSE stream with `{"type":"error","error":"PHIRedactionGuardrail.check() got an
+   unexpected keyword argument 'context'"}` instead of completing. Fixed by widening the signature to
+   `check(self, content, context=None)` (the guardrail redacts the model's *output*, so `context` is
+   accepted but unused). Any custom `PatternGuardrail`/`BaseGuardrail` subclass overriding `check()` needs
+   the same fix on 0.18+.
 
 3. **`server.cors` is required, not optional, for the browser frontend to work.** Neither doc's config
    sketch includes a `cors:` block. `koboi/server/app.py` only adds `CORSMiddleware` when `server.cors`
