@@ -136,6 +136,14 @@ function humanizeTool(toolName) {
   return map[toolName] || toolName;
 }
 
+// Strip koboi's internal skill-activation marker so it never reaches the lawyer-facing UI.
+// The marker (e.g. "[ACTIVATE_SKILL: indemnification-clauses]") is a server-side routing signal,
+// not text meant for the user; only the rendered output is cleaned, the accumulated `content`
+// string keeps the raw text so the final state is correct.
+function cleanStreamText(s) {
+  return (s || "").replace(/\[ACTIVATE_SKILL:\s*[^\]]+\]\s*/g, "");
+}
+
 // propose_redline is RiskLevel.MODERATE, and koboi's server-side approval handler pauses for a
 // human on MODERATE and DESTRUCTIVE tools alike (only SAFE auto-approves) -- see
 // koboi/guardrails/approval.py:AsyncCallbackApprovalHandler. That's a good fit here: a lawyer
@@ -239,7 +247,7 @@ async function reviewClause(clauseText) {
       (event) => {
         switch (event.type) {
           case "tool_call":
-            reviewOutput.textContent = `${content}\n\n[${humanizeTool(event.tool_name)}...]`;
+            reviewOutput.textContent = `${cleanStreamText(content)}\n\n[${humanizeTool(event.tool_name)}...]`;
             if (event.tool_name === "propose_redline") {
               reviewOutput.classList.add("has-redline"); // cosmetic changebar accent
             }
@@ -249,15 +257,15 @@ async function reviewClause(clauseText) {
             }
             break;
           case "pending_approval":
-            reviewOutput.textContent = `${content}\n\n[waiting for approval below before the draft is shown]`;
+            reviewOutput.textContent = `${cleanStreamText(content)}\n\n[waiting for approval below before the draft is shown]`;
             handlePendingApproval(event);
             break;
           case "text_delta":
             content += event.content;
-            reviewOutput.textContent = content;
+            reviewOutput.textContent = cleanStreamText(content);
             break;
           case "complete":
-            reviewOutput.textContent = content || "(no response text -- check tool_call output above)";
+            reviewOutput.textContent = cleanStreamText(content) || "(no response text -- check tool_call output above)";
             enableRedlineActions();
             break;
           case "error":
@@ -306,7 +314,7 @@ function askAboutClause(text) {
         case "text_delta":
           if (statusBubble.isConnected) statusBubble.remove();
           if (!agentBubble) agentBubble = addBubble("agent", "");
-          agentBubble.textContent += event.content;
+          agentBubble.textContent += cleanStreamText(event.content);
           break;
         case "complete":
           if (statusBubble.isConnected) statusBubble.remove();
@@ -356,7 +364,7 @@ async function sendChatMessage(message) {
           case "text_delta":
             if (statusBubble.isConnected) statusBubble.remove();
             if (!agentBubble) agentBubble = addBubble("agent", "");
-            agentBubble.textContent += event.content;
+            agentBubble.textContent += cleanStreamText(event.content);
             chatLog.scrollTop = chatLog.scrollHeight;
             break;
           case "complete":
