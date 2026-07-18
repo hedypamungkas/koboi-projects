@@ -1,0 +1,18 @@
+# Northwind Strategy market-intel -- one koboi container (deep_research) + web UI.
+# API on host 8008, web on 3008.
+services:
+  koboi:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports: ["8008:8000"]
+    volumes: ["koboi-data:/data"]
+    env_file:
+      - .env
+  web:
+    build: ./frontend
+    ports: ["3008:80"]
+    depends_on: [koboi]
+
+volumes:
+  koboi-data:

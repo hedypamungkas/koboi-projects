@@ -1,0 +1,143 @@
+# customer-success/config/agent.yaml -- SaaS account health, churn-risk scoring & renewal outreach.
+#
+# This is the SINGLE-AGENT use case in the new set (UC1-3 are orchestrated). That matters: the
+# features below only behave correctly on the single-agent facade path --
+#   - self_healing.self_consistency  -- N-sample voting on a structured churn-risk answer
+#   - the pending_approval pause for draft_outreach (MODERATE) -- the in-chat HITL flow the
+#     orchestrated use cases can't surface
+#   - memory.proactive              -- durable per-account facts, recalled each turn
+# Headline new-feature combo (none exercised by the 6 prior use cases):
+#   - memory.proactive (extract/recall/core_block) + self_healing.self_consistency + media +
+#     handover + jobs.webhooks.
+#
+# Field names verified against koboi-agent==0.18.2 koboi/config_models.py.
+
+agent:
+  name: "customer-success"
+  description: "Account-health analyst for the customer-success team"
+  system_prompt: |
+    You are a customer-success analyst for a B2B SaaS company. You help a CSM (customer success
+    manager) watch account health, spot churn risk, and act on it.
+    - To assess an account, call fetch_account_health for its signals, then score_churn_risk for
+      the computed 0-100 risk score and contributing factors.
+    - When asked for a risk assessment, reply with ONLY a single JSON object (no markdown fences,
+      no extra prose) with exactly these keys: account_id, churn_risk_score (0-100),
+      risk_level (low/medium/high), recommended_action (one of: maintain, check_in,
+      escalate_to_csm, schedule_qbr), rationale. This answer is consensus-voted (sampled N times),
+      so keep it deterministic and grounded in the fetched signals.
+    - To draft outreach, call draft_outreach -- it pauses for the CSM's approval before the draft
+      is saved, because sending copy in a customer's voice is a human-gated action.
+    - For an account that is clearly at-risk and needs a human now, call flag_at_risk; that hands
+      the account to the CSM with a warm summary.
+    Never send email or publish anything yourself.
+  mode: act
+  max_iterations: 10
+
+llm:
+  provider: "openai"
+  model: "${OPENAI_MODEL}"
+  api_key: "${OPENAI_API_KEY}"
+  base_url: "${OPENAI_BASE_URL:}"
+
+embedding:
+  # Proactive recall embeds each turn to surface stored account facts.
+  provider: "openai"
+  base_url: "${EMBEDDING_BASE_URL:}"
+  api_key: "${EMBEDDING_API_KEY:}"
+
+tools:
+  custom:
+    - module: cs_ext.tools
+
+context:
+  strategy: smart_truncation
+  max_context_tokens: 8000
+
+# --- Proactive long-term memory: durable per-account facts, recalled each turn (HEADLINE) ---
+memory:
+  backend: sqlite
+  db_path: /data/koboi_memory.db
+  proactive:
+    enabled: true
+    extract: true       # auto-extract durable facts (account id, CSM, commitments, sentiment) after each run
+    recall: true        # semantic recall + inject top-N facts each turn
+    core_block: true    # always-in-context core-memory block
+    top_k: 4
+    min_score: 0.2
+    max_facts: 200
+
+# --- Self-healing: consensus-vote the structured churn-risk answer + ground it ---
+guardrails:
+  input: { detect_injection: true }
+  rate_limit: { max_calls_per_minute: 20 }
+  output:
+    - name: grounding_check
+      provider: "openai"
+      model: "${OPENAI_MODEL}"
+      api_key: "${OPENAI_API_KEY}"
+      base_url: "${OPENAI_BASE_URL:}"
+      threshold: 0.7
+  audit:
+    db_path: /data/audit/cs.db
+
+self_healing:
+  enabled: true
+  fail_soft: true
+  graceful_max_iter: true
+  # P4 self-consistency: sample the structured churn-risk terminal answer N times and aggregate.
+  # The single-agent facade path is what runs this (orchestrated use cases can't).
+  self_consistency:
+    enabled: true
+    n_samples: 3
+    max_concurrency: 3
+    modes: [act, auto]
+  triggers:
+    low_grounding: { threshold: 0.6 }
+  ladder: {}   # grounding -> reflect -> handover
+
+# --- Multimodal: generate a QBR summary image on request (mock provider = offline-safe) ---
+media:
+  enabled: true
+  image:
+    provider: mock
+  budget:
+    max_images: 10
+    max_cost_usd: 2.0
+  storage:
+    backend: local
+
+# --- Warm hand-off: at-risk accounts route to the CSM with a digest ---
+handover:
+  detection:
+    enabled: true
+    coverage_threshold: 0.5
+  digest:
+    enabled: true
+
+sandbox:
+  backend: restricted   # the weekly account-review job runs unattended -> requires restricted
+
+server:
+  enabled: true
+  host: "0.0.0.0"
+  port: 8000
+  auth_required: false   # local smoke-test POC -- production sets true + keys
+  cors:
+    allow_origins: ["http://localhost:3010"]
+    expose_headers: ["X-Session-Id"]
+  allowed_modes: [chat, act, auto]
+  limits:
+    max_iterations_cap: 12
+
+jobs:
+  enabled: true
+  max_concurrent: 5
+  resume_on_startup: true
+  timeout_seconds: 900
+  webhooks:
+    # HMAC-signed terminal-status callback to the CRM (Salesforce/Gainsight stand-in).
+    # Default local sink so the demo runs offline.
+    - url: "${CRM_WEBHOOK_URL:http://localhost:9999/account-review}"
+      events: [completed, failed, timed_out]
+      secret: "${CRM_WEBHOOK_SECRET:}"
+      timeout: 15

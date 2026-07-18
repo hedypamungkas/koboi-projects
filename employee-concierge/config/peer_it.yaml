@@ -1,0 +1,67 @@
+# employee-concierge/config/peer_it.yaml -- the IT DESK peer (its own koboi instance).
+#
+# Runs as a separate container (docker-compose service `peer-it`, port 8011). The front-door
+# concierge calls it via /v1/peer/invoke using the builtin call_peer_agent. This config accepts
+# the inbound bearer token "tok-it" (see concierge.yaml's peers[].token).
+agent:
+  name: "it-desk"
+  description: "Northwind IT service desk peer -- hardware, accounts, access"
+  system_prompt: |
+    You are Northwind's IT service desk. Another agent (the employee concierge) forwards you
+    focused IT requests. Resolve them with your tools: lookup_asset to check a device,
+    reset_password for account lockouts, request_access for role/group access. Confirm exactly
+    what you did. You only handle IT -- do not attempt facilities work.
+  mode: act
+  max_iterations: 8
+
+llm:
+  provider: "openai"
+  model: "${OPENAI_MODEL}"
+  api_key: "${OPENAI_API_KEY}"
+  base_url: "${OPENAI_BASE_URL:}"
+
+tools:
+  custom:
+    - module: concierge_ext.it_tools
+
+# Policy gate: prod-admin / root access is never granted via the IT desk -- hard-deny at the
+# argument level so the tool call is refused before it runs (no approval surface needed). This is
+# the control that matters on the A2A path (call_peer_agent is SAFE; the gate lives where the
+# gated tool lives). argument_patterns = per-arg globs (config_models PolicyRuleConfig).
+policy:
+  rules:
+    - tool: request_access
+      argument_patterns:
+        role: "*prod-admin*"
+      action: deny
+    - tool: request_access
+      argument_patterns:
+        role: "*root*"
+      action: deny
+
+# Accept inbound peer calls from the front-door concierge (token "tok-it").
+peers:
+  enabled: true
+  allow_private_network: true
+  inbound_tokens:
+    - "${PEER_IT_TOKEN:tok-it}"
+
+memory:
+  backend: sqlite
+  db_path: /data/koboi_memory.db
+
+# A2A peer_invoke on an act-mode agent requires sandbox.backend='restricted'
+# (koboi/server/app.py:_run_peer_agent refuses passthrough, same gate as jobs). Our tools are
+# plain Python, so restricted containment is inert for them -- it only satisfies the gate.
+sandbox:
+  backend: restricted
+
+server:
+  enabled: true
+  host: "0.0.0.0"
+  port: 8000
+  auth_required: false   # local POC; peer_invoke still checks inbound_tokens
+  allowed_modes: [chat, act]
+
+jobs:
+  enabled: false

@@ -1,0 +1,154 @@
+# insurance-claims/config/agent.yaml -- Beacon Mutual P&C first-notice-of-loss (FNOL) triage.
+#
+# Headline new-feature combo (none exercised by the 6 prior use cases):
+#   - self_healing + grounding_check -- verify coverage claims are grounded in the policy, and
+#     CRITIC-recheck the damage-estimate arithmetic via the built-in `calculate` tool
+#   - handover (detection + digest) -- warm hand-off to a human adjuster via transfer_to_human
+#   - policy.rules -- deny auto-recommending a settlement for a total loss (no approval surface needed)
+#   - jobs.webhooks -- notify the core claims system when an autonomous triage job finishes
+#
+# Field names verified against koboi-agent==0.18.2 koboi/config_models.py.
+#
+# ARCHITECTURE NOTE -- why this is single-agent, not an orchestrated DAG. The design doc
+# originally sketched a multi-agent DAG (coverage_check / damage_estimate / fraud_screen / decide).
+# In koboi 0.18.2 that does NOT work as written: the orchestrator's local sub-agent builder
+# (koboi/orchestration/orchestrator.py:478 -> AgentFactory.create_agent) only knows four hardcoded
+# demo agents (hr/sales/finance/general) and falls back to "general" for anything else; the
+# config-aware builder (factory.py _build_agent_from_def) is defined but has zero callers, so
+# orchestration.agents[].system_prompt / rag / tools are ignored at runtime. Each DAG node would
+# run as the generic "general" agent with no tools and no per-node RAG -- so it could not look up
+# the claim, read the policy, or screen fraud. Rather than ship a headline that doesn't work, this
+# app runs the full triage as ONE agent on the single-agent facade path, where the custom tools,
+# RAG, self_healing, handover, and policy gates all genuinely fire. (Orchestration is still
+# showcased in this repo -- by market-intel's deep_research mode, which DOES inject web tools into
+# its research nodes by a separate code path.) See README "Why single-agent, not a DAG".
+
+agent:
+  name: "claims-triage"
+  description: "Beacon Mutual P&C first-notice-of-loss triage agent"
+  system_prompt: |
+    You triage first-notice-of-loss (FNOL) auto claims for Beacon Mutual. You NEVER pay a claim or
+    move money -- triage classifies, checks coverage, estimates damage, screens for fraud, and ROUTES.
+    For a claim, work through these steps:
+    1. Call lookup_claim with the claim id to read the claim record.
+    2. Determine coverage from the retrieved policy text (the policy doc is retrieved for you). State
+       the policy section you rely on and any applicable deductible.
+    3. Call estimate_repair_cost with the claim's damage description.
+    4. Call screen_fraud with the claim id; weigh the result against the retrieved fraud-indicator protocol.
+    5. Decide and act:
+       - Covered + low value (under $3,000) + low fraud: call record_recommendation with a suggested
+         settlement amount and a one-line rationale citing the coverage basis.
+       - High value, coverage-questionable, complex, OR fraud risk medium/high: call transfer_to_human
+         with a concise reason (this produces a warm hand-off to an adjuster with a session digest).
+    Always cite the policy section behind the coverage call. Never claim to pay or move money.
+  mode: act
+  max_iterations: 12
+
+llm:
+  provider: "openai"
+  model: "${OPENAI_MODEL}"
+  api_key: "${OPENAI_API_KEY}"
+  base_url: "${OPENAI_BASE_URL:}"
+
+embedding:
+  # Dedicated embedding provider (the chat LLM gateway doesn't serve embeddings).
+  provider: "openai"
+  base_url: "${EMBEDDING_BASE_URL:}"
+  api_key: "${EMBEDDING_API_KEY:}"
+
+tools:
+  builtin: [transfer_to_human]
+  custom:
+    - module: claims_ext.tools
+
+# Policy + fraud-protocol RAG, on the agent itself (single-agent path consumes rag.documents).
+rag:
+  enabled: true
+  retriever: hybrid
+  top_k: 6
+  documents:
+    - path: "/app/data/seed/auto_policy.md"
+    - path: "/app/data/seed/fraud_indicators.md"
+
+context:
+  strategy: smart_truncation
+  max_context_tokens: 8000
+
+# --- Self-healing: ground coverage claims in the policy + CRITIC-verify repair math ---
+guardrails:
+  input: { detect_injection: true }
+  rate_limit: { max_calls_per_minute: 20 }
+  # NOTE: grounding_check is intentionally NOT used here, even though coverage reasoning leans on
+  # the policy RAG. This triage is tool-driven -- the load-bearing facts (claim record, repair
+  # estimate, fraud screen) come from tool RESULTS, not retrieved chunks. grounding_check judges
+  # faithfulness to retrieved context, so a correct tool-sourced answer scores ~0.08 and abstains
+  # ("I don't have enough grounded information"), which both misfires and triggers a self-healing
+  # retry loop. The policy RAG is still retrieved (for coverage reasoning); it's just not scored
+  # by a grounding guardrail. grounding_check fits RAG-Q&A apps (see customer-success), not this.
+  audit:
+    db_path: /data/audit/claims.db
+
+self_healing:
+  enabled: true
+  max_turns: 3
+  fail_soft: true
+  graceful_max_iter: true
+  triggers:
+    tool_error: { repeat_threshold: 2 }
+  tool_verification:
+    # P4 CRITIC: re-check the damage-estimate math via the built-in `calculate` tool.
+    enabled: true
+    tools: [calculate]
+    max_claims: 5
+  ladder: {}
+
+# --- Warm human hand-off: digest summarizes the session for the receiving adjuster ---
+handover:
+  detection:
+    enabled: true
+    coverage_threshold: 0.5
+  digest:
+    enabled: true
+
+# --- Policy gate: total-loss claims must route to a human, never auto-recommend ---
+policy:
+  rules:
+    # `deny` hard-blocks the tool call (needs no approval surface, unlike `confirm`), forcing the
+    # agent to route a total loss to transfer_to_human instead. argument_patterns = per-arg globs.
+    - tool: record_recommendation
+      argument_patterns:
+        rationale: "*total loss*"
+      action: deny
+
+memory:
+  backend: sqlite
+  db_path: /data/koboi_memory.db
+
+# Autonomous triage jobs require sandbox.backend='restricted' (koboi/server/jobs.py refuses
+# passthrough). Our tools are plain Python (no subprocess/shell), so containment is inert for them.
+sandbox:
+  backend: restricted
+
+server:
+  enabled: true
+  host: "0.0.0.0"
+  port: 8000
+  auth_required: false   # local smoke-test POC -- production sets true + keys
+  cors:
+    allow_origins: ["http://localhost:3007"]
+    expose_headers: ["X-Session-Id"]
+  allowed_modes: [chat, act, auto]
+  limits:
+    max_iterations_cap: 15
+
+jobs:
+  enabled: true
+  max_concurrent: 5
+  resume_on_startup: true
+  timeout_seconds: 900
+  webhooks:
+    # HMAC-signed (X-Koboi-Signature) terminal-status callback to the core claims system.
+    - url: "${CLAIMS_WEBHOOK_URL:http://localhost:9999/claims-triage}"
+      events: [completed, failed, timed_out]
+      secret: "${CLAIMS_WEBHOOK_SECRET:}"
+      timeout: 15

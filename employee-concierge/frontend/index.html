@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Northwind -- Employee Concierge</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230d1018'/%3E%3Crect x='1' y='1' width='30' height='30' rx='6' fill='none' stroke='%235b8cff' stroke-width='1.5'/%3E%3Ctext x='16' y='22' font-family='monospace' font-size='15' font-weight='700' fill='%235b8cff' text-anchor='middle'%3ENW%3C/text%3E%3C/svg%3E" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    color-scheme: dark;
+    --void: #07090e; --surface: #11151f; --surface-raised: #161b28; --surface-inset: #0b0e15;
+    --border-subtle: rgba(255,255,255,0.06); --border: rgba(255,255,255,0.11); --border-strong: rgba(255,255,255,0.2);
+    --text-primary: #edf0f6; --text-secondary: #8b91a5; --text-tertiary: #565c73;
+    --blue: #5b8cff; --blue-dim: rgba(91,140,255,0.14); --blue-border: rgba(91,140,255,0.4);
+    --green: #35d999; --green-dim: rgba(53,217,153,0.13); --green-border: rgba(53,217,153,0.4);
+    --red: #ff6b6b; --red-dim: rgba(255,107,107,0.13); --red-border: rgba(255,107,107,0.42);
+    --font-sans: "Public Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --radius-sm: 6px; --radius-md: 10px;
+  }
+  * { box-sizing: border-box; }
+  ::selection { background: var(--blue-dim); color: var(--text-primary); }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 8px; }
+  :focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+  html, body { height: 100%; }
+  body { margin: 0; font-family: var(--font-sans); background: var(--void); color: var(--text-primary); height: 100vh; display: flex; flex-direction: column; position: relative; font-size: 14px; -webkit-font-smoothing: antialiased; }
+  body::before { content: ""; position: fixed; inset: 0 0 auto 0; height: 2px; z-index: 5; background: linear-gradient(90deg, var(--blue), var(--green) 60%, var(--red)); opacity: 0.5; }
+  header { position: relative; z-index: 1; padding: 14px 22px; border-bottom: 1px solid var(--border-subtle); background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand__mark { font-family: var(--font-mono); font-weight: 700; font-size: 13px; color: var(--blue); background: var(--blue-dim); border: 1px solid var(--blue-border); border-radius: var(--radius-sm); width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .brand__text h1 { font-size: 14.5px; margin: 0; font-weight: 700; letter-spacing: -0.01em; line-height: 1.3; }
+  .brand__org { display: block; font-size: 11px; color: var(--text-tertiary); margin-top: 1px; }
+  .header-right { display: flex; align-items: center; gap: 14px; }
+  .peer-pills { display: flex; gap: 6px; }
+  .peer-pill { font-family: var(--font-mono); font-size: 10px; font-weight: 600; letter-spacing: 0.04em; color: var(--text-secondary); background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 4px 9px; }
+  .conn { display: flex; align-items: center; gap: 7px; font-family: var(--font-mono); font-size: 11.5px; color: var(--text-tertiary); }
+  .conn-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-tertiary); flex-shrink: 0; }
+  .conn-dot.active { background: var(--green); box-shadow: 0 0 0 3px var(--green-dim); animation: pulse-dot 2.4s ease-in-out infinite; }
+  @keyframes pulse-dot { 0%,100% { box-shadow: 0 0 0 3px var(--green-dim); } 50% { box-shadow: 0 0 0 5px transparent; } }
+  main { flex: 1; display: flex; overflow: hidden; position: relative; z-index: 1; }
+  #chat-col { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  #chat { flex: 1; overflow-y: auto; padding: 20px 24px; display: flex; flex-direction: column; }
+  #chat:empty::before { content: "Ask for help with a laptop, access, a desk move, or a building issue. The concierge routes you to the right department."; margin: auto; max-width: 420px; text-align: center; color: var(--text-tertiary); font-size: 13px; line-height: 1.6; }
+  .msg { margin-bottom: 16px; max-width: 78%; animation: msg-in 0.22s ease both; }
+  @keyframes msg-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+  .msg.user { margin-left: auto; text-align: right; }
+  .msg.tool, .msg.error { max-width: 92%; }
+  .msg-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.07em; font-weight: 700; color: var(--text-tertiary); margin-bottom: 4px; }
+  .msg.user .msg-label { text-align: right; }
+  .msg .bubble { display: inline-block; padding: 9px 13px; border-radius: var(--radius-md); font-size: 14px; line-height: 1.55; white-space: pre-wrap; text-align: left; word-break: break-word; }
+  .msg.user .bubble { background: var(--blue); color: #0a0e18; font-weight: 500; border-bottom-right-radius: 3px; }
+  .msg.agent .bubble { background: var(--surface); border: 1px solid var(--border); border-bottom-left-radius: 3px; }
+  .msg.agent.thinking .bubble { display: inline-flex; align-items: center; gap: 4px; padding: 12px 14px; }
+  .typing-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--text-tertiary); animation: typing-bounce 1.2s ease-in-out infinite; }
+  .typing-dot:nth-child(2) { animation-delay: 0.15s; } .typing-dot:nth-child(3) { animation-delay: 0.3s; }
+  @keyframes typing-bounce { 0%,60%,100% { opacity: 0.35; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-2px); } }
+  .msg.tool .bubble { background: var(--surface-inset); border: 1px dashed var(--border); color: var(--text-secondary); font-family: var(--font-mono); font-size: 12px; border-radius: var(--radius-sm); }
+  .msg.tool .bubble.tool-call { color: var(--blue); border-color: rgba(91,140,255,0.3); }
+  .msg.tool .bubble.tool-result { color: var(--text-secondary); }
+  .msg.error .bubble { background: var(--red-dim); border: 1px solid var(--red-border); color: #ffb4b4; border-radius: var(--radius-sm); }
+  #composer { border-top: 1px solid var(--border-subtle); padding: 14px 24px 16px; display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; background: linear-gradient(0deg, rgba(255,255,255,0.015), transparent); }
+  .composer-row { display: flex; gap: 10px; min-width: 0; }
+  #composer input { flex: 1; min-width: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 11px 14px; color: var(--text-primary); font-size: 14px; font-family: var(--font-sans); transition: border-color 0.15s ease; }
+  #composer input:focus { border-color: var(--blue-border); outline: none; }
+  #composer input::placeholder { color: var(--text-tertiary); }
+  #composer button { background: var(--blue); color: #0a0e18; border: none; border-radius: var(--radius-md); padding: 10px 20px; font-size: 13.5px; font-weight: 700; cursor: pointer; flex-shrink: 0; transition: filter 0.12s ease, transform 0.08s ease; }
+  #composer button:hover { filter: brightness(1.1); } #composer button:active { transform: translateY(1px); }
+  .composer-hint { font-size: 10.5px; color: var(--text-tertiary); padding-left: 2px; }
+  .composer-hint kbd { font-family: var(--font-mono); background: var(--surface); border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; font-size: 10px; }
+  .quick { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 2px; }
+  .quick button { background: var(--surface); color: var(--text-secondary); border: 1px solid var(--border); border-radius: 999px; padding: 5px 11px; font-size: 11.5px; font-weight: 500; cursor: pointer; font-family: var(--font-sans); }
+  .quick button:hover { border-color: var(--blue-border); color: var(--blue); }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <span class="brand__mark">NW</span>
+    <div class="brand__text">
+      <h1>Employee Concierge</h1>
+      <span class="brand__org">Northwind &middot; cross-department A2A</span>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="peer-pills">
+      <span class="peer-pill">peer &middot; IT</span>
+      <span class="peer-pill">peer &middot; Facilities</span>
+    </div>
+    <span class="conn"><span class="conn-dot" id="conn-dot"></span><span id="session-id" class="sub">no session</span></span>
+  </div>
+</header>
+<main>
+  <section id="chat-col">
+    <div id="chat"></div>
+    <form id="composer">
+      <div class="quick">
+        <button type="button" data-q="I'm emp-42 and my laptop (AST-1001) won't boot.">Laptop won't boot</button>
+        <button type="button" data-q="Please reset the password for emp-43.">Reset password</button>
+        <button type="button" data-q="Move emp-42 to floor 5, desk 5-C-20.">Desk move</button>
+        <button type="button" data-q="The AC on the 4th floor kitchen is leaking.">Report maintenance</button>
+        <button type="button" data-q="Grant emp-42 prod-admin access for deploy work.">Request prod-admin</button>
+      </div>
+      <div class="composer-row">
+        <input id="message" type="text" placeholder="Describe what you need..." autocomplete="off" />
+        <button type="submit">Send</button>
+      </div>
+      <span class="composer-hint">The concierge routes to the IT / Facilities peers; prod-admin is policy-denied &middot; <kbd>Enter</kbd> to send</span>
+    </form>
+  </section>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

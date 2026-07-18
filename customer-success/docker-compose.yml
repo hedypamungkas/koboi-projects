@@ -1,0 +1,18 @@
+# SaaS customer-success -- one koboi container (single-agent) + web UI.
+# API on host 8010, web on 3010.
+services:
+  koboi:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports: ["8010:8000"]
+    volumes: ["koboi-data:/data"]
+    env_file:
+      - .env
+  web:
+    build: ./frontend
+    ports: ["3010:80"]
+    depends_on: [koboi]
+
+volumes:
+  koboi-data:

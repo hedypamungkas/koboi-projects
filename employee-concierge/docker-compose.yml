@@ -1,0 +1,48 @@
+# Northwind employee concierge -- cross-instance A2A: three koboi containers + one web UI.
+# The front-door `concierge` (8009) calls the `peer-it` (8011) and `peer-facilities` (8012)
+# peers over the compose private network via the builtin call_peer_agent tool.
+#
+# All three services build from the SAME image; KOBOI_CONFIG selects each one's config.
+services:
+  peer-it:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      KOBOI_CONFIG: peer_it
+    ports: ["8011:8000"]
+    volumes: ["koboi-data-it:/data"]
+    env_file: [.env]
+
+  peer-facilities:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      KOBOI_CONFIG: peer_facilities
+    ports: ["8012:8000"]
+    volumes: ["koboi-data-fac:/data"]
+    env_file: [.env]
+
+  concierge:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      KOBOI_CONFIG: concierge
+      PEER_IT_URL: "http://peer-it:8000"
+      PEER_FACILITIES_URL: "http://peer-facilities:8000"
+    ports: ["8009:8000"]
+    volumes: ["koboi-data-concierge:/data"]
+    env_file: [.env]
+    depends_on: [peer-it, peer-facilities]
+
+  web:
+    build: ./frontend
+    ports: ["3009:80"]
+    depends_on: [concierge]
+
+volumes:
+  koboi-data-concierge:
+  koboi-data-it:
+  koboi-data-fac:

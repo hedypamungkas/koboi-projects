@@ -1,0 +1,138 @@
+# employee-concierge/config/concierge.yaml -- the FRONT-DOOR of the A2A concierge.
+#
+# Headline new-feature combo (none exercised by the 6 prior use cases):
+#   - peers / cross-instance A2A -- the builtin call_peer_agent tool fans requests out to the
+#     department peer instances (peer-it, peer-facilities), each running its OWN koboi + tools.
+#   - hooks (declarative command hooks) -- a fire-and-forget script opens a ServiceNow-style
+#     ticket on every resolution, with NO Python registered inside the agent (config only).
+#   - policy.rules -- deny policy-violating access requests (e.g. granting prod-admin) at the
+#     arg level, the control gate that works without an in-flow approval card.
+#   - memory.proactive -- remember the employee's profile/device across interactions.
+#   - handover -- complex multi-department cases hand to a human coordinator with a digest.
+#
+# Field names verified against koboi-agent==0.18.2 koboi/config_models.py. Modelled on
+# configs/a2a_instance_x.yaml + a2a_dag_remote.yaml (shipped upstream).
+#
+# This front-door is a SINGLE agent (not orchestrated) that uses call_peer_agent to collaborate
+# with peers -- so proactive memory (a single-agent feature) works here, and there is still no
+# in-flow pending_approval (call_peer_agent is SAFE; controls are policy.rules + handover).
+
+agent:
+  name: "employee-concierge"
+  description: "Northwind internal employee-services front door -- routes to department peers"
+  system_prompt: |
+    You are Northwind's internal employee-services concierge. An employee asks for help with
+    something (a broken laptop, an access request, a desk move, a maintenance issue, a policy
+    question). You do NOT try to be every department yourself -- you COLLABORATE with the right
+    department peer agent(s) via the call_peer_agent tool and synthesize their answers into one
+    clear reply for the employee.
+    - Decide which peer(s) to involve: "IT" for hardware, accounts, access, software;
+      "Facilities" for desks, office moves, building/maintenance. For anything spanning both,
+      fan out to both in one call_peer_agent call.
+    - Pass each peer a focused, self-contained request (include the employee id and the specifics).
+    - If a request is policy-sensitive, ambiguous, or the peers can't fully resolve it, hand off
+      to a human coordinator with transfer_to_human and a short reason.
+    Never promise access or changes the peer didn't confirm. Keep the employee informed in plain
+    language.
+  mode: act
+  max_iterations: 10
+
+llm:
+  provider: "openai"
+  model: "${OPENAI_MODEL}"
+  api_key: "${OPENAI_API_KEY}"
+  base_url: "${OPENAI_BASE_URL:}"
+
+embedding:
+  # Proactive recall (memory.proactive.recall) embeds the user message each turn.
+  provider: "openai"
+  base_url: "${EMBEDDING_BASE_URL:}"
+  api_key: "${EMBEDDING_API_KEY:}"
+
+tools:
+  # call_peer_agent is a builtin; listing it under tools.builtin is what turns it on (an empty
+  # builtin list means zero builtin tools). transfer_to_human is the handover path.
+  builtin: [call_peer_agent, transfer_to_human]
+
+# --- Cross-instance A2A: the department peers this front door can call ---
+# No org_secret here (unverified peers, static bearer) so the front door does not hard-fail at
+# boot if a peer is briefly down -- production would add org_secret for verified-only calls.
+peers:
+  enabled: true
+  allow_private_network: true   # peers live on the compose private network (http://peer-it:8000)
+  peers:
+    - name: IT
+      url: "${PEER_IT_URL:http://peer-it:8000}"
+      token: "${PEER_IT_TOKEN:tok-it}"      # presented TO peer-it (its inbound_token)
+      agent_name: it-desk
+      org: northwind
+    - name: Facilities
+      url: "${PEER_FACILITIES_URL:http://peer-facilities:8000}"
+      token: "${PEER_FACILITIES_TOKEN:tok-fac}"
+      agent_name: facilities-desk
+      org: northwind
+
+# (Policy lives on the PEER that owns the gated tool -- see peer_it.yaml. The concierge only
+# calls call_peer_agent / transfer_to_human, so a request_access rule here would never fire.)
+
+# --- Declarative command hook: open a ServiceNow-style ticket on every resolution ---
+# NO Python registered inside the agent -- the hook spawns an external script per event,
+# passing a JSON HookContext on stdin. SECURITY: allow_exec defaults to false; set true to enable.
+hooks:
+  allow_exec: true
+  command_timeout: 10
+  on_event:
+    - name: open-servicenow-ticket
+      command: ["python3", "/app/scripts/open_ticket.py"]
+      events: ["post_output"]   # fire once per finished concierge reply
+      fire_and_forget: true     # observe/side-effect, not awaited -> zero SSE latency
+      priority: 60
+      timeout: 10
+      abort_on_error: false     # a flaky ticket script must not break the agent loop
+
+# --- Proactive long-term memory: remember the employee across interactions ---
+memory:
+  backend: sqlite
+  db_path: /data/koboi_memory.db
+  proactive:
+    enabled: true
+    extract: true       # auto-extract durable facts (employee id, device, role) after each run
+    recall: true        # semantic recall + inject top-N facts each turn
+    core_block: true    # always-in-context core-memory block
+    top_k: 4
+    min_score: 0.2
+    max_facts: 200
+
+# --- Handover: complex / unresolved cases -> human coordinator with a warm digest ---
+handover:
+  detection:
+    enabled: true
+    coverage_threshold: 0.5
+  digest:
+    enabled: true
+
+context:
+  strategy: smart_truncation
+  max_context_tokens: 8000
+
+server:
+  enabled: true
+  host: "0.0.0.0"
+  port: 8000
+  # A2A-enabled servers REQUIRE auth: with outbound peers configured, peer_registry.has_peers
+  # is true, so koboi's auth middleware (koboi/server/auth.py) demands a Bearer token on every
+  # endpoint -- server.auth_required:false cannot override that (dev mode only applies when NO
+  # credentials of any kind are configured). So the concierge carries an API key (CONCIERGE_API_KEY)
+  # for the employee/frontend caller; the peer instances authenticate /v1/peer/invoke via their
+  # inbound_tokens instead. This matches the shipped configs/a2a_*.yaml (all set auth_required: true).
+  auth_required: true
+  api_keys: ["${CONCIERGE_API_KEY}"]
+  cors:
+    allow_origins: ["http://localhost:3009"]
+    expose_headers: ["X-Session-Id"]
+  allowed_modes: [chat, act, auto]
+  limits:
+    max_iterations_cap: 12
+
+jobs:
+  enabled: false

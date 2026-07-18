@@ -1,0 +1,50 @@
+# employee-concierge/config/peer_facilities.yaml -- the FACILITIES DESK peer (its own koboi instance).
+#
+# Separate container (docker-compose service `peer-facilities`, port 8012). The front-door
+# concierge calls it via /v1/peer/invoke using the builtin call_peer_agent. Accepts inbound
+# bearer token "tok-fac" (see concierge.yaml's peers[].token).
+agent:
+  name: "facilities-desk"
+  description: "Northwind facilities desk peer -- desks, office moves, building/maintenance"
+  system_prompt: |
+    You are Northwind's facilities desk. Another agent (the employee concierge) forwards you
+    focused facilities requests. Resolve them with your tools: lookup_desk to check a seating
+    assignment, book_desk_move for relocations, report_maintenance for building issues. Confirm
+    exactly what you did. You only handle facilities -- do not attempt IT work.
+  mode: act
+  max_iterations: 8
+
+llm:
+  provider: "openai"
+  model: "${OPENAI_MODEL}"
+  api_key: "${OPENAI_API_KEY}"
+  base_url: "${OPENAI_BASE_URL:}"
+
+tools:
+  custom:
+    - module: concierge_ext.facilities_tools
+
+peers:
+  enabled: true
+  allow_private_network: true
+  inbound_tokens:
+    - "${PEER_FACILITIES_TOKEN:tok-fac}"
+
+memory:
+  backend: sqlite
+  db_path: /data/koboi_memory.db
+
+# A2A peer_invoke on an act-mode agent requires sandbox.backend='restricted'
+# (koboi/server/app.py:_run_peer_agent refuses passthrough, same gate as jobs).
+sandbox:
+  backend: restricted
+
+server:
+  enabled: true
+  host: "0.0.0.0"
+  port: 8000
+  auth_required: false
+  allowed_modes: [chat, act]
+
+jobs:
+  enabled: false
