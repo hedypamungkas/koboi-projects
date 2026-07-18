@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Beacon Mutual — Claims Triage Bureau</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23ece4d3'/%3E%3Ctext x='16' y='23' font-family='Georgia,serif' font-size='20' font-weight='700' fill='%237e2424' text-anchor='middle'%3EB%3C/text%3E%3C/svg%3E" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;0,6..72,700;1,6..72,400;1,6..72,500&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --paper: #ece4d3;
+    --paper-raised: #f2ebdc;
+    --paper-inset: #e4dac4;
+    --ink: #221d15;
+    --ink-soft: #5d5343;
+    --ink-faint: #8a7e69;
+    --rule: rgba(34, 29, 21, 0.16);
+    --rule-strong: rgba(34, 29, 21, 0.4);
+    --oxblood: #7e2424;
+    --oxblood-dim: rgba(126, 36, 36, 0.12);
+    --forest: #2f5a37;
+    --forest-dim: rgba(47, 90, 55, 0.12);
+    --ochre: #976019;
+    --ochre-dim: rgba(151, 96, 25, 0.14);
+    --serif: "Newsreader", "Source Serif Pro", Georgia, serif;
+    --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: var(--serif);
+    color: var(--ink);
+    background: var(--paper);
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    position: relative;
+    overflow-x: hidden;
+  }
+  /* aged-paper grain + faint ledger rules */
+  body::before {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background-image:
+      repeating-linear-gradient(0deg, transparent 0 31px, rgba(34,29,21,0.045) 31px 32px),
+      url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.13  0 0 0 0 0.11  0 0 0 0 0.08  0 0 0 0.06 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+    opacity: 0.9;
+  }
+  /* deckle edge feel: a soft vignette top */
+  body::after {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background: radial-gradient(120% 80% at 50% -10%, transparent 60%, rgba(80,60,30,0.10) 100%);
+  }
+
+  /* ---------- masthead ---------- */
+  header {
+    position: relative; z-index: 2;
+    display: grid; grid-template-columns: 1fr auto;
+    align-items: end; gap: 24px;
+    padding: 26px 40px 14px;
+    border-bottom: 3px double var(--ink);
+  }
+  .brand { display: flex; flex-direction: column; gap: 2px; }
+  .brand__house {
+    font-family: var(--serif); font-weight: 600; font-style: italic;
+    font-size: 13px; letter-spacing: 0.02em; color: var(--oxblood);
+  }
+  .brand__name {
+    font-family: var(--serif); font-weight: 700;
+    font-size: clamp(28px, 3.4vw, 40px); line-height: 1; letter-spacing: -0.01em;
+    font-variant: small-caps;
+  }
+  .brand__sub {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.22em;
+    text-transform: uppercase; color: var(--ink-soft); margin-top: 8px;
+  }
+  .brand__sub b { color: var(--ink); font-weight: 600; }
+  .mast-right { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
+  .stamp {
+    font-family: var(--mono); font-weight: 600; font-size: 13px; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--oxblood);
+    border: 2.5px solid var(--oxblood); padding: 6px 14px 5px;
+    transform: rotate(-4deg); opacity: 0.82;
+    box-shadow: inset 0 0 0 1px rgba(126,36,36,0.35);
+    border-radius: 2px;
+    position: relative;
+  }
+  .stamp::after {
+    content: ""; position: absolute; inset: -3px; border: 1px dashed var(--oxblood);
+    opacity: 0.4; border-radius: 3px; transform: rotate(1.5deg);
+  }
+  .file-ref { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); letter-spacing: 0.04em; }
+  .file-ref .conn-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--ink-faint); margin-right: 6px; transform: translateY(-1px); }
+  .file-ref .conn-dot.on { background: var(--forest); }
+  #session-id { color: var(--ink-soft); }
+
+  main {
+    position: relative; z-index: 1;
+    display: grid; grid-template-columns: 360px 1fr;
+    height: calc(100vh - 92px);
+  }
+
+  /* ---------- intake ledger (left) ---------- */
+  #ledger {
+    border-right: 1.5px solid var(--ink);
+    overflow-y: auto; padding: 0 0 20px;
+    background: linear-gradient(90deg, var(--paper-inset), var(--paper) 60px);
+  }
+  .ledger-head {
+    position: sticky; top: 0; z-index: 1;
+    background: var(--paper); padding: 20px 28px 12px;
+    border-bottom: 1.5px solid var(--ink);
+  }
+  .ledger-head h2 {
+    margin: 0; font-family: var(--serif); font-weight: 700; font-size: 17px;
+    font-variant: small-caps; letter-spacing: 0.01em;
+  }
+  .ledger-head .meta {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.18em;
+    text-transform: uppercase; color: var(--ink-faint); margin-top: 5px;
+    display: flex; justify-content: space-between;
+  }
+  .ledger-head .meta b { color: var(--oxblood); font-weight: 600; }
+
+  .ledger-row {
+    position: relative; display: grid;
+    grid-template-columns: auto 1fr auto; gap: 14px; align-items: center;
+    padding: 16px 28px; cursor: pointer;
+    border-bottom: 1px solid var(--rule);
+    transition: background 0.14s ease;
+  }
+  .ledger-row:hover { background: var(--paper-raised); }
+  .ledger-row:hover .row-id { color: var(--oxblood); }
+  .row-idx {
+    font-family: var(--mono); font-size: 11px; color: var(--ink-faint);
+    writing-mode: vertical-rl; transform: rotate(180deg); letter-spacing: 0.1em;
+  }
+  .row-body { min-width: 0; }
+  .row-id { font-family: var(--mono); font-weight: 600; font-size: 13.5px; color: var(--ink); letter-spacing: 0.02em; transition: color 0.14s; }
+  .row-holder { font-family: var(--serif); font-size: 16px; font-weight: 500; margin-top: 1px; }
+  .row-loss { font-family: var(--serif); font-style: italic; font-size: 13.5px; color: var(--ink-soft); margin-top: 2px; }
+  .sev {
+    font-family: var(--mono); font-weight: 600; font-size: 10px; letter-spacing: 0.1em;
+    text-transform: uppercase; padding: 5px 9px 4px; border: 1.5px solid;
+    transform: rotate(2deg); position: relative;
+  }
+  .sev::before { content: ""; position: absolute; inset: 2px; border: 0.5px solid currentColor; opacity: 0.4; }
+  .sev.low { color: var(--forest); border-color: var(--forest); background: var(--forest-dim); }
+  .sev.medium { color: var(--ochre); border-color: var(--ochre); background: var(--ochre-dim); }
+  .sev.high { color: var(--oxblood); border-color: var(--oxblood); background: var(--oxblood-dim); }
+
+  /* ---------- case file (chat) ---------- */
+  #case { display: flex; flex-direction: column; min-width: 0; background: transparent; }
+  .case-head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    padding: 20px 40px 12px; border-bottom: 1px solid var(--rule);
+  }
+  .case-head h2 { margin: 0; font-family: var(--serif); font-weight: 700; font-size: 17px; font-variant: small-caps; }
+  .case-head .note { font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-faint); }
+
+  #chat { flex: 1; overflow-y: auto; padding: 26px 40px 10px; display: flex; flex-direction: column; gap: 4px; }
+  #chat:empty::before {
+    content: "Select a claim from the intake ledger, or enter a claim reference for triage below.";
+    font-style: italic; color: var(--ink-faint); font-size: 15px; margin: auto; max-width: 360px; text-align: center; line-height: 1.6;
+  }
+  .entry { margin-bottom: 18px; max-width: 78%; animation: stamp-in 0.3s ease both; }
+  @keyframes stamp-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  .entry > .role {
+    font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.2em; text-transform: uppercase;
+    color: var(--ink-faint); margin-bottom: 5px; display: flex; align-items: center; gap: 8px;
+  }
+  .entry > .role::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
+  .entry .body { font-size: 16px; line-height: 1.6; }
+  .entry.user { margin-left: auto; }
+  .entry.user > .role { color: var(--oxblood); justify-content: flex-end; }
+  .entry.user > .role::after { display: none; }
+  .entry.user > .role::before { content: ""; flex: 1; height: 1px; background: var(--rule); }
+  .entry.user .body {
+    font-family: var(--serif); font-style: italic; font-weight: 500; text-align: right;
+    color: var(--ink); padding: 4px 0;
+  }
+  .entry.agent .body {
+    font-family: var(--serif); background: var(--paper-raised);
+    border-left: 3px solid var(--ink); padding: 14px 18px; white-space: pre-wrap;
+    border-radius: 0 3px 3px 0; box-shadow: 0 1px 0 var(--rule);
+  }
+  .entry.agent.thinking .body { font-family: var(--mono); font-size: 13px; color: var(--ink-faint); letter-spacing: 0.1em; }
+  .entry.agent.thinking .body .d { animation: blink 1.2s infinite; }
+  .entry.agent.thinking .body .d:nth-child(2){animation-delay:.15s}.entry.agent.thinking .body .d:nth-child(3){animation-delay:.3s}
+  @keyframes blink { 0%,60%,100%{opacity:.3} 30%{opacity:1} }
+  .entry.tool { max-width: 92%; }
+  .entry.tool .body {
+    font-family: var(--mono); font-size: 12px; line-height: 1.55; color: var(--ink-soft);
+    background: var(--paper-inset); border: 1px solid var(--rule); padding: 8px 12px;
+    border-radius: 2px; white-space: pre-wrap;
+  }
+  .entry.tool .body.call { color: var(--ink); border-left: 3px solid var(--forest); }
+  .entry.tool .body.call::before { content: "▸ "; color: var(--forest); }
+  .entry.tool .body.result::before { content: "◂ "; color: var(--ink-faint); }
+  .entry.error .body { font-family: var(--mono); font-size: 12.5px; color: var(--oxblood); border: 1px solid var(--oxblood); background: var(--oxblood-dim); padding: 8px 12px; border-radius: 2px; }
+
+  /* approval = a "for sign-off" form block */
+  .approval {
+    border: 1.5px solid var(--ochre); background: var(--paper-raised);
+    max-width: 92%; margin: 6px 0 18px; animation: stamp-in 0.3s ease both; position: relative;
+  }
+  .approval::before {
+    content: "REQUIRES SIGN-OFF"; position: absolute; top: -10px; left: 16px;
+    font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.2em; background: var(--paper);
+    color: var(--ochre); padding: 0 8px; font-weight: 600;
+  }
+  .approval__body { padding: 16px 18px 12px; }
+  .approval__body .t { font-family: var(--serif); font-weight: 600; font-size: 16px; margin-bottom: 10px; }
+  .approval__body .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; font-family: var(--mono); font-size: 12px; }
+  .approval__body .k { color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.06em; font-size: 10.5px; padding-top: 2px; }
+  .approval__body .v { color: var(--ink); word-break: break-word; }
+  .approval__body pre { margin: 6px 0 0; font-family: var(--mono); font-size: 12px; white-space: pre-wrap; word-break: break-word; }
+  .approval__actions { display: flex; gap: 0; border-top: 1px solid var(--rule); }
+  .approval__actions button {
+    flex: 1; border: none; background: transparent; cursor: pointer; font-family: var(--serif);
+    font-size: 15px; font-weight: 600; padding: 12px; transition: background 0.14s;
+  }
+  .approval__actions .approve { color: var(--forest); border-right: 1px solid var(--rule); }
+  .approval__actions .approve:hover { background: var(--forest-dim); }
+  .approval__actions .reject { color: var(--oxblood); font-style: italic; }
+  .approval__actions .reject:hover { background: var(--oxblood-dim); }
+  .approval__actions button:disabled { opacity: 0.45; cursor: default; }
+
+  /* ---------- composer ---------- */
+  #composer {
+    border-top: 3px double var(--ink); padding: 18px 40px 22px;
+    background: var(--paper); flex-shrink: 0;
+  }
+  .compose-label { font-family: var(--mono); font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink-faint); margin-bottom: 8px; }
+  .compose-row { display: flex; gap: 18px; align-items: flex-end; }
+  .field { flex: 1; }
+  .field input {
+    width: 100%; border: none; border-bottom: 1.5px solid var(--ink); background: transparent;
+    font-family: var(--serif); font-size: 19px; font-style: italic; color: var(--ink);
+    padding: 8px 2px; outline: none;
+  }
+  .field input::placeholder { color: var(--ink-faint); }
+  .field input:focus { border-bottom-color: var(--oxblood); }
+  .send {
+    font-family: var(--serif); font-weight: 600; font-size: 16px; letter-spacing: 0.02em;
+    background: var(--ink); color: var(--paper); border: none; padding: 10px 22px; cursor: pointer;
+    font-variant: small-caps; transition: background 0.14s;
+  }
+  .send:hover { background: var(--oxblood); }
+  .hint { font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; color: var(--ink-faint); margin-top: 10px; }
+
+  ::-webkit-scrollbar { width: 10px; }
+  ::-webkit-scrollbar-track { background: var(--paper-inset); }
+  ::-webkit-scrollbar-thumb { background: var(--rule-strong); border: 2px solid var(--paper-inset); }
+
+  @media (max-width: 820px) {
+    main { grid-template-columns: 1fr; height: auto; }
+    #ledger { max-height: 38vh; }
+    header { padding: 20px 22px 12px; }
+    #chat, #composer, .case-head { padding-left: 22px; padding-right: 22px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <span class="brand__house">Beacon Mutual · est. 1924</span>
+    <span class="brand__name">Claims Triage Bureau</span>
+    <span class="brand__sub">First Notice of Loss &nbsp;·&nbsp; <b>Personal Auto</b> &nbsp;·&nbsp; Desk 4</span>
+  </div>
+  <div class="mast-right">
+    <div class="stamp">FNOL · Open</div>
+    <div class="file-ref"><span class="conn-dot" id="conn-dot"></span><span id="session-id">awaiting intake</span></div>
+  </div>
+</header>
+<main>
+  <section id="ledger">
+    <div class="ledger-head">
+      <h2>Intake Ledger</h2>
+      <div class="meta"><span>Claim · Insured · Loss</span><span><b>4</b> pending</span></div>
+    </div>
+    <div id="claim-list"></div>
+  </section>
+  <section id="case">
+    <div class="case-head">
+      <h2>Case File</h2>
+      <span class="note">Triage routes — it never pays a claim</span>
+    </div>
+    <div id="chat"></div>
+    <form id="composer">
+      <div class="compose-label">— For Triage —</div>
+      <div class="compose-row">
+        <div class="field"><input id="message" type="text" placeholder="Enter a claim reference, e.g. CLM-501…" autocomplete="off" /></div>
+        <button type="submit" class="send">File</button>
+      </div>
+      <div class="hint">High-value, coverage-questionable, or fraud-flagged claims are routed to an adjuster by hand.</div>
+    </form>
+  </section>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

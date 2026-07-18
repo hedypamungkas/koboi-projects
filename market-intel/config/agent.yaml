@@ -1,0 +1,144 @@
+# market-intel/config/agent.yaml -- recurring cited competitive-intelligence briefings.
+#
+# Headline new-feature combo (none exercised by the 6 prior use cases):
+#   - orchestration execution.mode: deep_research -- plan -> search -> fetch -> coverage -> synthesize
+#   - websearch (brave/firecrawl/httpx; mock default so the demo runs offline)
+#   - research: cited, coverage-gated, persist_findings dumps a jsonl for later reuse
+#   - self_healing + grounding_check -- every claim in the brief must be grounded/cited
+#   - handover -- if coverage can't be reached, hand to a human analyst with a digest
+#   - jobs.webhooks -- HMAC-signed POST of the finished brief to the wiki/Slack receiver
+#
+# Field names verified against koboi-agent==0.18.2 koboi/config_models.py. Modelled on
+# configs/deep_research_demo.yaml (shipped upstream).
+#
+# Like insurance-claims (07), orchestration routes both chat and jobs through the orchestrator
+# with no pending_approval surface -- which is fine here: a research brief has no in-flow
+# money action. Human involvement is handover on low coverage, not an approval card.
+
+agent:
+  name: "market-intel"
+  description: "Cited competitive-intelligence research agent (deep_research)"
+  system_prompt: |
+    You produce cited competitive-intelligence briefs for Northwind Strategy. Research the
+    requested competitors/topics across multiple web sources, then synthesize a concise
+    brief with NUMBERED citations to every factual claim. If you cannot reach sufficient
+    coverage, say so explicitly rather than inventing detail. Keep each brief tight: the
+    changes that matter (pricing, launches, earnings, personnel, regulatory), not a dump.
+    Tracked watchlist (cover when a brief is requested without specific names): Acme Cloud,
+    Brightline Ops, Coreway Systems. Focus areas: pricing/packaging, product launches,
+    earnings, notable hires/departures, regulatory moves.
+  mode: act
+  max_iterations: 20   # deep_research fans out many search/fetch nodes
+
+llm:
+  provider: "openai"
+  model: "${OPENAI_MODEL}"
+  api_key: "${OPENAI_API_KEY}"
+  base_url: "${OPENAI_BASE_URL:}"
+  timeout: 300          # planning + synthesis via a slow gateway can exceed the 120 default
+  max_retries: 3
+
+# --- Deep-research orchestration (the headline) ---
+orchestration:
+  enabled: true
+  execution:
+    mode: deep_research
+
+research:
+  max_depth: 3              # coverage-gated re-plan rounds
+  max_searches: 40          # total across all depth rounds
+  max_fetches: 50
+  coverage_threshold: 0.7   # stop once coverage >= this
+  citations: numbered       # [1], [2] ... mapped to a sources list
+  persist_findings: /data/research_findings.jsonl   # dump for later corpus reuse
+
+websearch:
+  search:
+    # mock = offline-safe (no provider configured). Set WEB_SEARCH_PROVIDER=brave|firecrawl
+    # with an API key in .env for live research.
+    provider: ${WEB_SEARCH_PROVIDER:mock}
+    max_results: 8
+    # brave:
+    #   api_key: ${BRAVE_API_KEY:}
+    #   country: "US"
+    # firecrawl:
+    #   api_key: ${FIRECRAWL_API_KEY:}
+    #   scrape_results: true
+  fetch:
+    provider: ${WEB_FETCH_PROVIDER:httpx}   # httpx (readability, default) or firecrawl (JS render)
+    # firecrawl:
+    #   api_key: ${FIRECRAWL_API_KEY:}
+    #   only_main_content: true
+
+# No tools.custom here on purpose: deep_research only injects its own web_search/web_fetch into
+# research nodes (verified live -- top-level custom tools are not invoked by the engine). So this
+# app is config-only: the engine plans/searches/fetches/synthesizes the cited brief itself, and
+# the brief lands as the job result (delivered via jobs.webhooks). "Sometimes the built-in is the
+# whole story" -- this is that use case.
+
+# --- Hallucination guard: every claim in the brief must be grounded/cited ---
+guardrails:
+  input: { detect_injection: true }
+  rate_limit: { max_calls_per_minute: 15 }
+  output:
+    - name: grounding_check
+      provider: "openai"
+      model: "${OPENAI_MODEL}"
+      api_key: "${OPENAI_API_KEY}"
+      base_url: "${OPENAI_BASE_URL:}"
+      threshold: 0.7
+  audit:
+    db_path: /data/audit/marketintel.db
+
+self_healing:
+  enabled: true
+  max_turns: 3
+  fail_soft: true
+  graceful_max_iter: true
+  triggers:
+    low_grounding: { threshold: 0.6 }
+  ladder: {}   # grounding -> reflect -> handover
+
+# --- Low coverage -> warm hand-off to a human analyst (not an approval card) ---
+handover:
+  detection:
+    enabled: true
+    coverage_threshold: 0.5
+  digest:
+    enabled: true
+
+memory:
+  backend: sqlite
+  db_path: /data/koboi_memory.db
+
+# Autonomous brief jobs require sandbox.backend='restricted' (koboi/server/jobs.py refuses
+# passthrough). Web tools are HTTP-only, so node behavior is unchanged; this only unblocks
+# jobs + tightens workspace isolation.
+sandbox:
+  backend: restricted
+  workdir: /data/workspace
+
+server:
+  enabled: true
+  host: "0.0.0.0"
+  port: 8000
+  auth_required: false   # local smoke-test POC -- production sets true + keys
+  cors:
+    allow_origins: ["http://localhost:3008"]
+    expose_headers: ["X-Session-Id"]
+  allowed_modes: [chat, act, auto]
+  limits:
+    max_iterations_cap: 25
+
+jobs:
+  enabled: true
+  max_concurrent: 3      # research jobs are LLM-heavy; keep concurrency modest
+  resume_on_startup: true
+  timeout_seconds: 1800  # a full cited brief fans out many searches
+  webhooks:
+    # HMAC-signed (X-Koboi-Signature) terminal-status callback carrying the finished brief.
+    # Default local sink so the demo runs offline.
+    - url: "${BRIEF_WEBHOOK_URL:http://localhost:9999/market-brief}"
+      events: [completed, failed, timed_out]
+      secret: "${BRIEF_WEBHOOK_SECRET:}"
+      timeout: 15

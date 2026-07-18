@@ -1,0 +1,19 @@
+# Beacon Mutual P&C claims triage -- one koboi container (orchestrated DAG) + web UI.
+# API published on host 8007, web on 3007 (8001-8006/3001-3006 are taken by the 6 existing
+# use cases in this repo).
+services:
+  koboi:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports: ["8007:8000"]
+    volumes: ["koboi-data:/data"]
+    env_file:
+      - .env
+  web:
+    build: ./frontend
+    ports: ["3007:80"]
+    depends_on: [koboi]
+
+volumes:
+  koboi-data:

@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>The Competitive Brief — Northwind Strategy</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23fff1e5'/%3E%3Ctext x='16' y='24' font-family='Georgia,serif' font-weight='700' font-size='22' fill='%231c1a18' text-anchor='middle'%3EN%3C/text%3E%3C/svg%3E" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,500;0,8..60,600;0,8..60,700;1,8..60,400;1,8..60,500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --salmon: #fff1e5;
+    --salmon-2: #f7e2cf;
+    --salmon-3: #efd6bd;
+    --ink: #1c1a18;
+    --ink-soft: #5b534a;
+    --ink-faint: #8a8074;
+    --rule: rgba(28, 26, 24, 0.2);
+    --rule-soft: rgba(28, 26, 24, 0.1);
+    --teal: #115e5e;
+    --terracotta: #b4452f;
+    --display: "DM Serif Display", "Playfair Display", Georgia, serif;
+    --text: "Source Serif 4", "Source Serif Pro", Georgia, serif;
+    --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: var(--text);
+    color: var(--ink);
+    background: var(--salmon);
+    font-size: 15px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    position: relative;
+  }
+  /* faint newsprint texture */
+  body::before {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.11  0 0 0 0 0.10  0 0 0 0 0.09  0 0 0 0.05 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+    opacity: 0.85;
+  }
+
+  /* ---------- masthead ---------- */
+  header { position: relative; z-index: 2; padding: 18px 36px 0; }
+  .mast-top { display: flex; justify-content: space-between; align-items: baseline; font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-soft); padding-bottom: 8px; border-bottom: 1px solid var(--rule); }
+  .mast-top .live { color: var(--terracotta); font-weight: 500; }
+  .mast-top .live::before { content: "● "; }
+  .mast-main { display: grid; grid-template-columns: 1fr auto 1fr; align-items: end; gap: 24px; padding: 14px 0 12px; border-bottom: 4px double var(--ink); }
+  .mast-left, .mast-right { font-family: var(--text); font-size: 12px; color: var(--ink-soft); }
+  .mast-left { text-align: left; }
+  .mast-right { text-align: right; }
+  .mast-left b, .mast-right b { display: block; font-family: var(--display); font-size: 15px; color: var(--ink); font-weight: 400; }
+  .nameplate { text-align: center; }
+  .nameplate .kicker { font-family: var(--mono); font-size: 10px; letter-spacing: 0.34em; text-transform: uppercase; color: var(--teal); margin-bottom: 4px; }
+  .nameplate h1 { font-family: var(--display); font-weight: 400; font-size: clamp(34px, 5vw, 58px); line-height: 0.95; margin: 0; letter-spacing: -0.01em; }
+  .nameplate h1 em { font-style: italic; color: var(--terracotta); }
+  .dateline { display: flex; justify-content: space-between; align-items: center; padding: 8px 0 10px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-faint); border-bottom: 1px solid var(--rule); }
+  .dateline .center { color: var(--ink-soft); }
+  .dateline .conn-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--ink-faint); margin-right: 6px; transform: translateY(-1px); }
+  .dateline .conn-dot.on { background: var(--teal); }
+
+  main { position: relative; z-index: 1; display: grid; grid-template-columns: 280px 1fr; height: calc(100vh - 210px); }
+
+  /* ---------- docket (left) ---------- */
+  #docket { border-right: 1px solid var(--ink); padding: 22px 24px; overflow-y: auto; background: linear-gradient(90deg, var(--salmon-2), transparent 120px); }
+  .docket-sec { margin-bottom: 26px; }
+  .docket-sec h3 { font-family: var(--mono); font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--terracotta); margin: 0 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--rule); font-weight: 500; }
+  .docket-item { display: block; font-family: var(--display); font-size: 19px; line-height: 1.25; color: var(--ink); padding: 7px 0; cursor: pointer; border-bottom: 1px dotted var(--rule); transition: color 0.14s, padding 0.14s; }
+  .docket-item:last-child { border-bottom: none; }
+  .docket-item:hover { color: var(--teal); padding-left: 8px; }
+  .docket-item .num { font-family: var(--mono); font-size: 10px; color: var(--ink-faint); vertical-align: super; margin-right: 6px; letter-spacing: 0.1em; }
+  .tag-row { display: flex; flex-wrap: wrap; gap: 6px; }
+  .tag { font-family: var(--text); font-style: italic; font-size: 13px; color: var(--ink-soft); border: 1px solid var(--rule); padding: 3px 10px; border-radius: 999px; cursor: pointer; transition: all 0.14s; }
+  .tag:hover { color: var(--salmon); background: var(--teal); border-color: var(--teal); }
+
+  /* ---------- the brief (chat) ---------- */
+  #brief { display: flex; flex-direction: column; min-width: 0; }
+  #chat { flex: 1; overflow-y: auto; padding: 28px 48px 16px; }
+  #chat:empty::before {
+    content: "Query the desk for a cited brief on a competitor or theme, or dispatch the weekly brief.";
+    font-family: var(--display); font-style: italic; font-size: 22px; color: var(--ink-faint);
+    display: block; max-width: 460px; margin: 60px auto; text-align: center; line-height: 1.4;
+  }
+  .item { margin-bottom: 22px; max-width: 76%; animation: ink 0.3s ease both; }
+  @keyframes ink { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+  .item .byline { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink-faint); margin-bottom: 6px; }
+  .item .copy { font-size: 16px; line-height: 1.6; }
+  .item.user { margin-left: auto; text-align: right; }
+  .item.user .copy { font-family: var(--text); font-style: italic; font-weight: 500; color: var(--ink); }
+  .item.agent { max-width: 88%; }
+  .item.agent .byline { color: var(--terracotta); }
+  .item.agent .copy {
+    font-family: var(--text); color: var(--ink); white-space: normal;
+    column-count: 1; text-align: justify; hyphens: auto;
+  }
+  .item.agent .copy.article {
+    background: transparent; border-top: 2px solid var(--ink); border-bottom: 1px solid var(--rule);
+    padding: 18px 0;
+  }
+  .item.agent .copy.article h3 { font-family: var(--display); font-weight: 400; font-size: 26px; line-height: 1.15; margin: 14px 0 8px; }
+  .item.agent .copy.article h3:first-child { margin-top: 0; }
+  .item.agent .copy.article p { margin: 0 0 10px; }
+  .item.agent .copy.article p:first-of-type::first-letter { font-family: var(--display); font-size: 46px; float: left; line-height: 0.85; padding: 4px 8px 0 0; color: var(--terracotta); }
+  .item.agent .copy.article ul { margin: 0 0 10px; padding-left: 18px; }
+  .item.agent .copy.article li { margin-bottom: 4px; }
+  .item.agent .copy.article sup { color: var(--teal); font-weight: 600; font-size: 0.7em; }
+  .item.agent.thinking .copy { font-family: var(--mono); font-size: 13px; color: var(--ink-faint); letter-spacing: 0.08em; }
+  .item.agent.thinking .copy .d { animation: blink 1.2s infinite; }
+  .item.agent.thinking .copy .d:nth-child(2){animation-delay:.15s}.item.agent.thinking .copy .d:nth-child(3){animation-delay:.3s}
+  @keyframes blink { 0%,60%,100%{opacity:.3} 30%{opacity:1} }
+  .item.tool { max-width: 92%; }
+  .item.tool .copy { font-family: var(--mono); font-size: 11.5px; color: var(--ink-soft); background: var(--salmon-2); border-left: 2px solid var(--teal); padding: 7px 11px; white-space: pre-wrap; }
+  .item.tool .copy.result { border-left-color: var(--ink-faint); }
+  .item.error .copy { font-family: var(--mono); font-size: 12px; color: var(--terracotta); border: 1px solid var(--terracotta); padding: 8px 12px; }
+
+  /* ---------- composer ---------- */
+  #composer { border-top: 4px double var(--ink); padding: 16px 48px 22px; background: var(--salmon); display: flex; flex-direction: column; gap: 10px; }
+  .compose-row { display: flex; gap: 14px; align-items: stretch; }
+  .qfield { flex: 1; display: flex; align-items: center; border-bottom: 1.5px solid var(--ink); }
+  .qfield::before { content: "§"; font-family: var(--display); color: var(--terracotta); font-size: 22px; margin-right: 10px; }
+  .qfield input { flex: 1; border: none; background: transparent; font-family: var(--text); font-style: italic; font-size: 19px; color: var(--ink); padding: 10px 0; outline: none; }
+  .qfield input::placeholder { color: var(--ink-faint); }
+  .send { font-family: var(--display); font-size: 19px; background: var(--ink); color: var(--salmon); border: none; padding: 0 24px; cursor: pointer; }
+  .send:hover { background: var(--teal); }
+  .dispatch { font-family: var(--text); font-style: italic; font-size: 14px; background: transparent; color: var(--terracotta); border: 1.5px solid var(--terracotta); padding: 0 18px; cursor: pointer; letter-spacing: 0.02em; }
+  .dispatch:hover { background: var(--terracotta); color: var(--salmon); }
+  .dispatch:disabled { opacity: 0.5; cursor: default; }
+  .note { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-faint); }
+
+  ::-webkit-scrollbar { width: 10px; }
+  ::-webkit-scrollbar-track { background: var(--salmon-2); }
+  ::-webkit-scrollbar-thumb { background: var(--rule); border: 2px solid var(--salmon); }
+
+  @media (max-width: 820px) {
+    main { grid-template-columns: 1fr; height: auto; }
+    #docket { max-height: 30vh; border-right: none; border-bottom: 1px solid var(--ink); }
+    header { padding: 14px 20px 0; }
+    #chat, #composer { padding-left: 20px; padding-right: 20px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="mast-top">
+    <span>Northwind Strategy · Competitive Intelligence</span>
+    <span class="live">Live Edition</span>
+  </div>
+  <div class="mast-main">
+    <div class="mast-left">Vol. VII<b>Cited · Coverage-gated</b></div>
+    <div class="nameplate">
+      <div class="kicker">The Deep-Research Desk</div>
+      <h1>The Competitive <em>Brief</em></h1>
+    </div>
+    <div class="mast-right">No. 042<b>Weekly · Strategist</b></div>
+  </div>
+  <div class="dateline">
+    <span><span class="conn-dot" id="conn-dot"></span><span id="session-id">press run</span></span>
+    <span class="center">Every claim cited · thin coverage hands off to an analyst</span>
+    <span>Plan → Search → Fetch → Synthesize</span>
+  </div>
+</header>
+<main>
+  <aside id="docket">
+    <div class="docket-sec">
+      <h3>On the Docket</h3>
+      <span id="chips-primary"></span>
+    </div>
+    <div class="docket-sec">
+      <h3>Beats</h3>
+      <div class="tag-row" id="chips-focus"></div>
+    </div>
+  </aside>
+  <section id="brief">
+    <div id="chat"></div>
+    <form id="composer">
+      <div class="compose-row">
+        <div class="qfield"><input id="message" type="text" placeholder="Research a competitor or theme this quarter…" autocomplete="off" /></div>
+        <button type="submit" class="send">Query</button>
+        <button type="button" id="run-brief" class="dispatch" title="Run the weekly competitive brief as an autonomous deep-research job">Dispatch weekly brief</button>
+      </div>
+      <span class="note">Mock provider runs offline · set WEB_SEARCH_PROVIDER=firecrawl for live cited research</span>
+    </form>
+  </section>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

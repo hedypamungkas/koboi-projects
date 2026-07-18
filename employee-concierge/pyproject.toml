@@ -1,0 +1,13 @@
+[project]
+name = "concierge-ext"
+version = "0.1.0"
+description = "Northwind internal employee-services concierge (cross-department A2A) extension for koboi-agent"
+requires-python = ">=3.10"
+dependencies = []
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
