@@ -1,10 +1,14 @@
-# TEST.md — reproducing the manual verification pass across all 6 use cases
+# TEST.md — reproducing the manual verification pass across all 10 use cases
 
-This is a runbook, not a test suite. It captures the exact real scenarios (backend `curl` calls and
-live-browser click-throughs) that were used to verify all 6 `koboi-use-cases` apps end to end, so a human
-or an AI agent can repeat the same pass later — after a koboi-agent upgrade, a redesign, or just to confirm
-nothing regressed. There is no automated test runner here; every app is a demo, and "testing" means
+This is a runbook, not a test suite. It captures the exact real scenarios (layered checks + backend `curl`
+calls + live-browser click-throughs) that were used to verify all 10 `koboi-use-cases` apps end to end, so a
+human or an AI agent can repeat the same pass later — after a koboi-agent upgrade, a redesign, or just to
+confirm nothing regressed. There is no automated test runner here; every app is a demo, and "testing" means
 actually running it against a real LLM and watching the real output.
+
+Testing here is **layered** (see "Testing in layers" below): a fast no-container pass (config schema + Python
+compile/import) catches most regressions in seconds, an integration pass confirms each stack boots, and only
+then does the slow, real-LLM end-to-end pass run. Run the layers in order — stop at the first broken layer.
 
 ## How to use this doc
 
@@ -19,6 +23,72 @@ actually running it against a real LLM and watching the real output.
 - Always `docker compose down` a project before moving to the next, so stopped-but-not-removed containers
   don't accumulate.
 
+## Testing in layers
+
+Run these in order. Each layer is progressively slower and more expensive (real LLM calls); stop at the
+first failure. The scripts below assume the sibling koboi-agent venv at `../koboi-agent/.venv/bin/python`
+(any environment with `koboi-agent==0.18.2` installed works).
+
+### Layer 1 — mock / unit (no containers, no LLM, ~2s)
+
+Catches the vast majority of regressions: a config that won't parse, a `@tool` with a bad JSON-schema, a
+syntax error. Run from the repo root with the env vars the `${...}` placeholders expect:
+
+```bash
+export OPENAI_API_KEY=sk OPENAI_MODEL=m OPENAI_BASE_URL=http://x EMBEDDING_API_KEY=sk EMBEDDING_BASE_URL=http://x \
+  CLAIMS_WEBHOOK_URL=http://x CLAIMS_WEBHOOK_SECRET=s BRIEF_WEBHOOK_URL=http://x BRIEF_WEBHOOK_SECRET=s \
+  CRM_WEBHOOK_URL=http://x CRM_WEBHOOK_SECRET=s WEB_SEARCH_PROVIDER=mock WEB_FETCH_PROVIDER=httpx \
+  BRAVE_API_KEY=b FIRECRAWL_API_KEY=f PEER_IT_URL=http://x PEER_FACILITIES_URL=http://x \
+  PEER_IT_TOKEN=t PEER_FACILITIES_TOKEN=t CONCIERGE_API_KEY=k
+PY=../koboi-agent/.venv/bin/python
+
+# 1a. every config parses against Config.from_yaml (koboi 0.18.2 strict schema)
+$PY - <<'EOF'
+import glob; from koboi.config import Config
+for p in sorted(glob.glob("*/config/*.yaml")):
+    Config.from_yaml(p); print("PASS", p)
+EOF
+
+# 1b. every extension .py compiles
+find . -path ./node_modules -prune -o -name '*.py' -not -path '*/__pycache__/*' -print \
+  | xargs $PY -m py_compile && echo "all .py compile"
+
+# 1c. each ext module imports (@tool decorators run) + the command-hook script runs standalone
+for mp in "insurance-claims/src:claims_ext.tools" "employee-concierge/src:concierge_ext.it_tools" \
+          "employee-concierge/src:concierge_ext.facilities_tools" "customer-success/src:cs_ext.tools"; do
+  PYTHONPATH="${mp%%:*}" $PY -c "import importlib; importlib.import_module('${mp##*:}')"
+done
+echo '{"event":"post_output","session_id":"s","output":"x"}' \
+  | CONCIERGE_TICKETS_LOG=/tmp/t.jsonl $PY employee-concierge/scripts/open_ticket.py
+```
+Expect: 12 configs PASS, all `.py` compile, all imports succeed, a ticket row written. (`market-intel` has
+no `src/` — it's config-only — so it's absent from 1c on purpose.)
+
+### Layer 2 — integration (each stack boots, ~10s each)
+
+Confirms the Docker wiring, config boot, and (for UC9) the 3-container A2A topology + auth gate come up.
+
+```bash
+cd <project-dir> && docker compose up -d && sleep 4
+curl -sf http://localhost:<backend-port>/healthz        # {"status":"ok"}
+curl -sf http://localhost:<backend-port>/readyz          # 200
+docker compose logs koboi | grep -iE 'error|traceback'   # expect nothing
+docker compose down
+```
+UC9 (`employee-concierge`) boots 3 containers — bring peers up first, then the concierge, and confirm all
+three `readyz` plus the A2A auth gate (`/v1/chat/stream` returns **401** with no token, **200** with
+`Authorization: Bearer $CONCIERGE_API_KEY`).
+
+### Layer 3 — end-to-end (real LLM, the scenarios below)
+
+Only this layer calls the LLM. It's the per-project "Backend smoke test" (curl) + "Browser walkthrough"
+(Chrome DevTools MCP or by hand) in each section below. **Known gateway behavior** (empty completions,
+slow deep-research) applies — read that section before calling anything broken.
+
+> **Frontend rebuild gotcha:** the web image bakes `index.html`/`app.js` in at build time. After editing
+> frontend source you MUST `docker compose build web && docker compose up -d --force-recreate web` — a bare
+> `up -d` serves the stale old image. (This bit UC1/UC3 mid-pass; rebuilt + re-verified.)
+
 ## One-time setup (per project)
 
 Every project needs its own `.env` (never commit it — it's gitignored):
@@ -27,7 +97,7 @@ Every project needs its own `.env` (never commit it — it's gitignored):
 cd <project-dir>          # e.g. ecommerce-support
 cp .env.example .env
 # edit .env: set OPENAI_API_KEY (and OPENAI_MODEL / OPENAI_BASE_URL if you're not using
-# the default OpenAI endpoint — all 6 apps were last verified against gpt-5.4-mini via a
+# the default OpenAI endpoint — all 10 apps were last verified against gpt-5.4-mini via a
 # custom OpenAI-compatible gateway, see "Known gateway behavior" below)
 ```
 
@@ -39,6 +109,10 @@ cp .env.example .env
 | 4 | `healthcare-intake` | `:8004` | `:3004` | chat only |
 | 5 | `legal-contract-review` | `:8005` | `:3005` | review form + chat + approval |
 | 6 | `real-estate` | `:8006` | `:3006` | tabbed chat + jobs dashboard |
+| 7 | `insurance-claims` | `:8007` | `:3007` | chat triage (self-healing + handover + policy) |
+| 8 | `market-intel` | `:8008` | `:3008` | deep-research briefs (config-only, no `src/`) |
+| 9 | `employee-concierge` | `:8009` (+peers `:8011`,`:8012`) | `:3009` | A2A concierge — **3 containers, auth required** |
+| 10 | `customer-success` | `:8010` | `:3010` | chat + vitals readout + HITL authorization |
 
 Generic lifecycle for any project:
 
@@ -261,6 +335,123 @@ Expect the job to call `delegate_tasks` (2+ items in one batch) rather than the 
 4. Confirm the stat counters at the top (Total / Pending / Completed / Failed) update to match the job
    list.
 
+## 7. `insurance-claims` — Beacon Mutual claims triage (single-agent, self-healing)
+
+**Backend smoke test:**
+```bash
+cd insurance-claims && docker compose build && docker compose up -d && sleep 4
+curl -sf http://localhost:8007/healthz
+curl -s -N -X POST http://localhost:8007/v1/chat/stream -H "Content-Type: application/json" \
+  -d '{"message":"Triage claim CLM-501 and route it.","mode":"act"}'
+```
+Expect `tool_call`/`tool_result` for `lookup_claim` → `screen_fraud` (low) → `estimate_repair_cost` ($1,242)
+→ `record_recommendation` ("queued for adjuster review"), then `complete`. A total-loss claim
+(`CLM-502`) instead routes to `transfer_to_human` (no recommendation recorded):
+```bash
+curl -s -N -X POST http://localhost:8007/v1/chat/stream -H "Content-Type: application/json" \
+  -d '{"message":"Triage claim CLM-502 and route it.","mode":"act"}'
+docker compose exec koboi cat /data/recommendations.jsonl   # CLM-501 rec, not CLM-502
+```
+
+**Browser walkthrough** (`http://localhost:3007` — cream "case-file / ledger" UI):
+1. Click the **CLM-501** row in the Intake Ledger — it prefills `Triage claim CLM-501 and route it.`
+2. Click **File**. Watch `OF RECORD` entries stream with single ▸/◂ markers (lookup → screen → estimate),
+   then a `TRIAGE MEMO` citing collision coverage, then `record_recommendation` recorded.
+3. Repeat for **CLM-502** — expect a `transfer_to_human` entry and no recommendation.
+
+## 8. `market-intel` — Northwind cited competitive briefs (deep_research, config-only)
+
+**Backend smoke test** (mock provider runs offline; set `WEB_SEARCH_PROVIDER=firecrawl` + `FIRECRAWL_API_KEY`
+for live cited research):
+```bash
+cd market-intel && docker compose build && docker compose up -d && sleep 4
+curl -sf http://localhost:8008/healthz
+curl -s -N --max-time 300 -X POST http://localhost:8008/v1/chat/stream -H "Content-Type: application/json" \
+  -d '{"message":"Research Acme Cloud pricing and product launches this quarter with citations.","mode":"act"}'
+```
+Expect `search`/`source`/`coverage` orchestration events, then a `complete` with a **cited** brief. With the
+mock provider the brief honestly reports "no verifiable results" with numbered citations rather than
+inventing facts — that anti-hallucination behavior is the pass signal. (Deep research is slow: a full brief
+fans out many searches; the job timeout is 1800s. A `--max-time` under ~180s may cut it off mid-research —
+that's latency, not a break.) Autonomous weekly brief job:
+```bash
+JOB=$(curl -s -X POST http://localhost:8008/v1/jobs -H "Content-Type: application/json" \
+  -d '{"message":"Run this week'\''s competitive brief; cite every claim.","mode":"act"}' \
+  | python3 -c 'import sys,json;print(json.load(sys.stdin)["job_id"])')
+curl -s -N "http://localhost:8008/v1/jobs/$JOB/stream"
+```
+
+**Browser walkthrough** (`http://localhost:3008` — salmon "broadsheet" UI):
+1. Click **Acme Cloud** under "ON THE DOCKET" — prefills `Research Acme Cloud this quarter.`
+2. Click **Query**. The brief renders as a newspaper **article** in the brief column: an h3 headline, a
+   drop-capped first paragraph, superscript `[1][2]…` citations, and a `## Sources` list.
+3. (Optional) click **Dispatch weekly brief** to run the autonomous job and tail its stream into the chat.
+
+## 9. `employee-concierge` — Northwind cross-department A2A (3 containers, auth required)
+
+A2A-enabled servers force auth: the concierge demands `Authorization: Bearer $CONCIERGE_API_KEY` on every
+endpoint. The `.env` default is `CONCIERGE_API_KEY=concierge-smoke-key-1234`.
+
+**Backend smoke test:**
+```bash
+cd employee-concierge && docker compose build
+docker compose up -d peer-it peer-facilities && sleep 4
+docker compose up -d concierge web
+for p in 8011 8012 8009; do curl -sf http://localhost:$p/healthz; done
+# auth gate:
+curl -s -o /dev/null -w "%{http_code}\n" -X POST http://localhost:8009/v1/chat/stream \
+  -H "Content-Type: application/json" -d '{"message":"hi","mode":"act"}'              # 401
+curl -s -N -X POST http://localhost:8009/v1/chat/stream \
+  -H "Content-Type: application/json" -H "Authorization: Bearer concierge-smoke-key-1234" \
+  -d '{"message":"I am emp-42 and my laptop AST-1001 will not boot. Help.","mode":"act"}'
+```
+Expect a `call_peer_agent` tool_call to the IT peer and a `tool_result` of `[IT] (OK)` with the peer's
+answer (AST-1001 = MacBook Pro 14, troubleshooting steps). Prod-admin is policy-denied at the peer:
+```bash
+curl -s -N -X POST http://localhost:8009/v1/chat/stream \
+  -H "Content-Type: application/json" -H "Authorization: Bearer concierge-smoke-key-1234" \
+  -d '{"message":"Grant emp-42 prod-admin access for deploy work.","mode":"act"}'
+# expect the IT peer to report the request_access(prod-admin) call was policy-denied
+docker compose exec concierge cat /data/tickets.jsonl   # command-hook wrote a ticket per resolution
+```
+
+**Browser walkthrough** (`http://localhost:3009` — warm "service portal" UI; the key is sent automatically):
+1. Click **Laptop won't boot** (pine-coded IT chip) → **Send**.
+2. A **routing card** renders: `Routing → IT desk` (pine) with the focused message, then `IT desk replied ←`
+   with the peer's formatted answer. Markdown (`**bold**`, `###`) renders, not literal.
+3. Click **Request prod-admin** → expect the policy-denied reply (no access created).
+4. Bring peers up before the concierge on restart (compose start-order race; a too-early call falls back to
+   `transfer_to_human` and succeeds on retry).
+
+## 10. `customer-success` — account health & renewal (single-agent, HITL)
+
+**Backend smoke test:**
+```bash
+cd customer-success && docker compose build && docker compose up -d && sleep 4
+curl -sf http://localhost:8010/healthz
+curl -s -N -X POST http://localhost:8010/v1/chat/stream -H "Content-Type: application/json" \
+  -d '{"message":"Score the churn risk for ACC-7702 and recommend an action.","mode":"act"}'
+```
+Expect `fetch_account_health` → `score_churn_risk` (81 / high) then a `complete` whose content is a single
+JSON object `{account_id, churn_risk_score, risk_level, recommended_action, rationale}`. HITL outreach:
+```bash
+SID=<session-id from the X-Session-Id header above>
+curl -s -N -X POST http://localhost:8010/v1/chat/stream -H "Content-Type: application/json" \
+  -H "X-Session-Id: $SID" \
+  -d '{"message":"Draft an email outreach for ACC-7702 about their usage decline and offer a QBR.","mode":"act"}'
+# grab approval_id from the pending_approval event, then (while the stream above is still open):
+curl -s -X POST http://localhost:8010/v1/sessions/$SID/approve -H "Content-Type: application/json" \
+  -d '{"approval_id":"<id>","decision":"approve","scope":"once"}'
+docker compose exec koboi ls /data/outreach/   # the approved draft json
+```
+
+**Browser walkthrough** (`http://localhost:3010` — dark "observatory / vitals" UI):
+1. Click the **ACC-7702** (high) vitals card → **Analyze**. The structured JSON renders as a **vitals
+   readout**: big `81/100` (coral), `HIGH RISK`, `action · escalate to csm`, + the rationale.
+2. Type `Draft an email outreach for ACC-7702 about their usage decline and offer a QBR.` → **Analyze**.
+3. An **authorization slab** renders (`✎ Authorize draft · FOR-SIGNATURE · MODERATE RISK`, args grid).
+   Click **Authorize** → the slab flips to `AUTHORIZED`, and `draft_outreach` reports the draft saved.
+
 ## Full regression checklist
 
 Use this as a final pass after any change to shared code (`koboi-agent` version bump, a shared frontend
@@ -274,5 +465,11 @@ pattern, docs). Check off each row after confirming it via the scenario above.
 | 4 | healthcare-intake | ☐ | ☐ | n/a (escalation flag only) | ☐ |
 | 5 | legal-contract-review | ☐ | ☐ | ☐ approve / ☐ reject | ☐ |
 | 6 | real-estate | ☐ | ☐ | n/a (buyer chat auto-denies) | ☐ |
+| 7 | insurance-claims | ☐ | ☐ triage + record | n/a (routes via transfer_to_human) | ☐ |
+| 8 | market-intel | ☐ | ☐ deep-research brief | n/a (low-coverage handover) | ☐ |
+| 9 | employee-concierge | ☐ (3 containers + A2A auth) | ☐ call_peer_agent routing | n/a (prod-admin policy-denied) | ☐ |
+| 10 | customer-success | ☐ | ☐ vitals readout | ☐ authorize / ☐ decline | ☐ |
+
+Layer 1 (no containers): ☐ 12/12 configs parse · ☐ all `.py` compile · ☐ ext modules import · ☐ `open_ticket.py` runs.
 
 Always finish with `docker compose down` in whichever project directory you're in.

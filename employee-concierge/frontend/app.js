@@ -1,147 +1,167 @@
-// app.js -- Northwind employee concierge front door. Chat wired to the concierge koboi
-// instance /v1/chat/stream (SSE). The concierge fans requests out to the IT / Facilities
-// peer instances via the builtin call_peer_agent tool -- those show up as tool_call events.
+// app.js -- Northwind Service Concierge (warm portal UI). Vanilla JS, talks to the concierge
+// koboi instance /v1/chat/stream (SSE). call_peer_agent fan-outs render as department route cards.
 
 const API_BASE = window.KOBOI_API_BASE || "http://localhost:8009";
-// A2A-enabled servers REQUIRE auth (outbound peers => peer_registry.has_peers => a Bearer token
-// is mandatory on every endpoint; auth_required:false can't override it). The concierge's API key
-// comes from CONCIERGE_API_KEY in .env (default below matches .env.example). Override at runtime
-// by setting window.KOBOI_API_KEY before this script loads.
-const API_KEY = window.KOBOI_API_KEY || "concierge-smoke-key-1234";
+const API_KEY = window.KOBOI_API_KEY || "concierge-smoke-key-1234"; // A2A forces auth (see README)
 
 let sessionId = null;
 
-function escapeHtml(str) {
-  return String(str).replace(/[&<>"']/g, (c) => (
-    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
-  ));
+const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => (
+  { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+));
+
+const peerDept = (name) => /facilit/i.test(name || "") ? "fac" : "it";
+const peerLabel = (d) => d === "fac" ? "Facilities desk" : "IT desk";
+
+// tiny markdown -> html (bold, headings, keep newlines)
+function md(text) {
+  let s = escapeHtml(text);
+  s = s.replace(/^#{1,4}\s+(.*)$/gm, '<b class="h">$1</b>');
+  s = s.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  return s;
 }
 
-const ROLE_LABELS = { user: "You", agent: "Concierge", tool: "Routing", error: "Error" };
-
-function addMessage(role, text) {
+function bubble(role, text) {
   const chat = document.getElementById("chat");
-  const wrap = document.createElement("div");
-  wrap.className = `msg ${role}`;
-  const label = document.createElement("div");
-  label.className = "msg-label";
-  label.textContent = ROLE_LABELS[role] || role;
-  const bubble = document.createElement("div");
-  bubble.className = "bubble";
+  const b = document.createElement("div");
+  b.className = `b ${role}`;
+  const lbl = document.createElement("div");
+  lbl.className = "lbl";
+  lbl.textContent = ({ user: "You", agent: "Concierge", tool: "Note", error: "Problem" })[role] || role;
+  const x = document.createElement("div");
+  x.className = "x";
   if (role === "tool") {
-    if (text.startsWith("->")) bubble.classList.add("tool-call");
-    else if (text.startsWith("<-")) bubble.classList.add("tool-result");
+    if (text.startsWith("->")) text = text.replace(/^->\s*/, "");
+    else if (text.startsWith("<-")) text = text.replace(/^<-\s*/, "");
   }
-  bubble.textContent = text;
-  wrap.appendChild(label);
-  wrap.appendChild(bubble);
-  chat.appendChild(wrap);
-  chat.scrollTop = chat.scrollHeight;
-  return bubble;
+  x.textContent = text;
+  b.appendChild(lbl); b.appendChild(x);
+  chat.appendChild(b); chat.scrollTop = chat.scrollHeight;
+  return x;
 }
 
-function addThinkingIndicator() {
+function thinking() {
   const chat = document.getElementById("chat");
-  const wrap = document.createElement("div");
-  wrap.className = "msg agent thinking";
-  wrap.innerHTML = `<div class="msg-label">Concierge</div><div class="bubble"><span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span></div>`;
-  chat.appendChild(wrap);
-  chat.scrollTop = chat.scrollHeight;
-  return wrap;
+  const b = document.createElement("div");
+  b.className = "b agent thinking";
+  b.innerHTML = `<div class="lbl">Concierge</div><div class="x"><span class="d">·</span><span class="d">·</span><span class="d">·</span> checking with the desk</div>`;
+  chat.appendChild(b); chat.scrollTop = chat.scrollHeight;
+  return b;
 }
 
-// call_peer_agent round-trips to another container, so allow a bit more time than a plain chat.
+// A call_peer_agent call/result -> a department routing card.
+function routeCard(kind, dept, text) {
+  const chat = document.getElementById("chat");
+  const r = document.createElement("div");
+  r.className = `route ${dept}`;
+  const head = kind === "call"
+    ? `<span class="d"></span>Routing <span class="arrow">→</span> ${escapeHtml(peerLabel(dept))}`
+    : `<span class="d"></span>${escapeHtml(peerLabel(dept))} replied <span class="arrow">←</span>`;
+  r.innerHTML = `<div class="head">${head}</div><div class="body ${kind === "result" ? "answer" : ""}">${kind === "result" ? md(text) : escapeHtml(text)}</div>`;
+  chat.appendChild(r); chat.scrollTop = chat.scrollHeight;
+}
+
+function extractPeerAndMessage(argsRaw) {
+  try {
+    const a = JSON.parse(argsRaw);
+    const call = (a.calls && a.calls[0]) || {};
+    return { dept: peerDept(call.peer), message: call.message || argsRaw };
+  } catch (e) { return { dept: "it", message: argsRaw }; }
+}
+function extractAnswer(resultRaw) {
+  // result like: "[IT] (OK)\nAnswer: <the answer>" -- show the Answer: part (or the whole thing).
+  const m = String(resultRaw).split(/Answer:\s*/i);
+  return m.length > 1 ? m.slice(1).join("Answer: ").trim() : String(resultRaw);
+}
+
 const STREAM_TIMEOUT_MS = 150_000;
 
 async function streamChat(message, onEvent) {
-  const headers = { "Content-Type": "application/json" };
-  if (API_KEY) headers["Authorization"] = `Bearer ${API_KEY}`;
+  const headers = { "Content-Type": "application/json", Authorization: `Bearer ${API_KEY}` };
   if (sessionId) headers["X-Session-Id"] = sessionId;
   let res;
   try {
     res = await fetch(`${API_BASE}/v1/chat/stream`, {
-      method: "POST", headers,
-      body: JSON.stringify({ message, mode: "act" }),
+      method: "POST", headers, body: JSON.stringify({ message, mode: "act" }),
       signal: AbortSignal.timeout(STREAM_TIMEOUT_MS),
     });
   } catch (err) {
-    const timedOut = err.name === "TimeoutError" || err.name === "AbortError";
-    onEvent({ type: "error", error: timedOut ? "Request timed out -- please retry." : String(err) });
-    return;
+    const t = err.name === "TimeoutError" || err.name === "AbortError";
+    onEvent({ type: "error", error: t ? "Timed out — please retry." : String(err) }); return;
   }
-  const newSid = res.headers.get("X-Session-Id");
-  if (newSid) {
-    sessionId = newSid;
-    document.getElementById("session-id").textContent = `session: ${sessionId.slice(0, 8)}`;
-    document.getElementById("conn-dot").classList.add("active");
-  }
+  const sid = res.headers.get("X-Session-Id");
+  if (sid) { sessionId = sid; document.getElementById("session-id").textContent = `session ${sid.slice(0,8)}`; document.getElementById("conn-dot").classList.add("on"); }
   if (!res.ok || !res.body) { onEvent({ type: "error", error: `HTTP ${res.status}` }); return; }
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buf = "";
+  const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = "";
   try {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      buf += decoder.decode(value, { stream: true });
-      const parts = buf.split("\n\n");
-      buf = parts.pop();
-      for (const line of parts) {
-        if (!line.startsWith("data: ") || line.includes("[DONE]")) continue;
-        try { onEvent(JSON.parse(line.slice(6))); } catch (e) { console.warn("bad SSE frame", line, e); }
+      buf += dec.decode(value, { stream: true });
+      const parts = buf.split("\n\n"); buf = parts.pop();
+      for (const ln of parts) {
+        if (!ln.startsWith("data: ") || ln.includes("[DONE]")) continue;
+        try { onEvent(JSON.parse(ln.slice(6))); } catch (e) { console.warn("bad SSE", ln, e); }
       }
     }
   } catch (err) {
-    const timedOut = err.name === "TimeoutError" || err.name === "AbortError";
-    onEvent({ type: "error", error: timedOut ? "Request timed out -- please retry." : String(err) });
+    const t = err.name === "TimeoutError" || err.name === "AbortError";
+    onEvent({ type: "error", error: t ? "Timed out — please retry." : String(err) });
   }
 }
 
-async function sendMessage(message) {
-  addMessage("user", message);
-  const thinking = addThinkingIndicator();
-  let cleared = false;
-  const clear = () => { if (!cleared) { cleared = true; thinking.remove(); } };
-  let agentBubble = null;
+async function send(message) {
+  bubble("user", message);
+  const think = thinking();
+  let cleared = false; const clear = () => { if (!cleared) { cleared = true; think.remove(); } };
+  let agentX = null;
   try {
     await streamChat(message, (evt) => {
       clear();
       switch (evt.type) {
         case "text_delta":
-          if (!agentBubble) agentBubble = addMessage("agent", "");
-          agentBubble.textContent += evt.content;
+          if (!agentX) agentX = bubble("agent", "");
+          agentX.textContent += evt.content;
           break;
         case "tool_call":
-          addMessage("tool", `-> ${evt.tool_name}(${evt.arguments})`);
+          if (evt.tool_name === "call_peer_agent") {
+            const { dept, message: msg } = extractPeerAndMessage(evt.arguments);
+            routeCard("call", dept, msg);
+          } else if (evt.tool_name === "transfer_to_human") {
+            bubble("tool", `→ handed to a human coordinator: ${evt.arguments}`);
+          } else {
+            bubble("tool", `-> ${evt.tool_name}(${evt.arguments})`);
+          }
           break;
         case "tool_result":
-          addMessage("tool", `<- ${evt.tool_name}: ${evt.result}`);
+          if (evt.tool_name === "call_peer_agent") {
+            const ans = extractAnswer(evt.result);
+            const dept = /^\[facilit/i.test(evt.result) ? "fac" : "it";
+            routeCard("result", dept, ans);
+          } else {
+            bubble("tool", `<- ${evt.tool_name}: ${evt.result}`);
+          }
           break;
         case "complete":
-          if (!agentBubble && evt.content) addMessage("agent", evt.content);
+          if (!agentX && evt.content) bubble("agent", evt.content);
           break;
         case "error":
-          addMessage("error", `Error: ${evt.error || JSON.stringify(evt)}`);
-          break;
-        default:
-          console.log("event", evt);
+          bubble("error", `Error: ${evt.error || JSON.stringify(evt)}`); break;
+        default: console.log("event", evt);
       }
     });
-  } finally {
-    clear();
-  }
+  } finally { clear(); }
 }
 
 document.getElementById("composer").addEventListener("submit", (e) => {
   e.preventDefault();
   const input = document.getElementById("message");
-  const message = input.value.trim();
-  if (!message) return;
+  const m = input.value.trim();
+  if (!m) return;
   input.value = "";
-  sendMessage(message).catch((err) => addMessage("error", `Error: ${err}`));
+  send(m).catch((err) => bubble("error", `Error: ${err}`));
 });
-
-document.querySelectorAll(".quick button[data-q]").forEach((btn) => {
+document.querySelectorAll(".quick-wrap button[data-q]").forEach((btn) => {
   btn.addEventListener("click", () => {
     document.getElementById("message").value = btn.dataset.q;
     document.getElementById("message").focus();
