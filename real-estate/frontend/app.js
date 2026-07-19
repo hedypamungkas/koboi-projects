@@ -6,6 +6,17 @@ const API_BASE = window.KOBOI_API_BASE || "http://localhost:8006";
 // empty; in production this would be a real Bearer token from `koboi keys create` (docs/00 #4).
 const API_KEY = window.KOBOI_API_KEY || "";
 
+// Escape untrusted strings before interpolating into innerHTML. Job content /
+// error / ids come from the server; job.content is LLM-generated draft text
+// (reachable via prompt-injected property/lead data), so never inject it raw
+// (P1 XSS). Sibling apps use textContent exclusively; this file builds rows
+// via template literals, so escape at every dynamic sink.
+function escapeHtml(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+  ));
+}
+
 // ---------------------------------------------------------------------------
 // Shared streaming helper (docs/00 #3)
 // ---------------------------------------------------------------------------
@@ -269,16 +280,16 @@ async function refreshJobs() {
       const row = document.createElement("div");
       row.className = "job-row";
       row.innerHTML = `
-        <div><strong>${job.job_id}</strong>
-          <span class="status-pill status-${job.status}">${job.status}</span>
+        <div><strong>${escapeHtml(job.job_id)}</strong>
+          <span class="status-pill status-${escapeHtml(job.status)}">${escapeHtml(job.status)}</span>
         </div>
-        <div class="meta">session ${job.session_id}</div>
+        <div class="meta">session ${escapeHtml(job.session_id)}</div>
       `;
       row.addEventListener("click", () => showJobDetail(job.job_id));
       listEl.appendChild(row);
     }
   } catch (e) {
-    listEl.innerHTML = `<p class="empty">Could not load jobs (${e.message}). Is the koboi server running?</p>`;
+    listEl.innerHTML = `<p class="empty">Could not load jobs (${escapeHtml(e.message)}). Is the koboi server running?</p>`;
     updateJobStats([]);
   }
 }
@@ -293,12 +304,12 @@ async function showJobDetail(jobId) {
     const job = await res.json();
     const content = job.result && job.result.content ? job.result.content : null;
     detail.innerHTML = `
-      <p class="meta">status: <span class="status-pill status-${job.status}">${job.status}</span> | session: ${job.session_id}</p>
-      ${job.error ? `<pre class="draft">Error: ${job.error}</pre>` : ""}
-      ${content ? `<pre class="draft">${content}</pre>` : "<p class=\"empty\">No result yet.</p>"}
+      <p class="meta">status: <span class="status-pill status-${escapeHtml(job.status)}">${escapeHtml(job.status)}</span> | session: ${escapeHtml(job.session_id)}</p>
+      ${job.error ? `<pre class="draft">Error: ${escapeHtml(job.error)}</pre>` : ""}
+      ${content ? `<pre class="draft">${escapeHtml(content)}</pre>` : "<p class=\"empty\">No result yet.</p>"}
     `;
   } catch (e) {
-    detail.innerHTML = `<p class="empty">Could not load job ${jobId}.</p>`;
+    detail.innerHTML = `<p class="empty">Could not load job ${escapeHtml(jobId)}.</p>`;
   }
 }
 

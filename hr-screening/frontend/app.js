@@ -153,6 +153,15 @@ function setDecision(jobId, decision) {
   render();
 }
 
+// Event delegation for the decision buttons (was inline onclick with a raw
+// job_id interpolated into a JS-string attribute -- a quote/paren in job_id
+// would break parsing). data-attributes are HTML-escaped at the sink.
+resultsBody.addEventListener("click", (ev) => {
+  const btn = ev.target.closest(".decision-btn[data-job]");
+  if (!btn) return;
+  setDecision(btn.dataset.job, btn.dataset.decision);
+});
+
 function render() {
   const sorted = rows.size === 0 ? [] : [...rows.values()].sort((a, b) => (b.score || 0) - (a.score || 0));
   // Skip the rebuild when nothing changed since the last render. The table polls every 4s and a
@@ -186,8 +195,8 @@ function render() {
       const decision = r.decision
         ? `<span class="decision-chip decision-${r.decision}">${r.decision === "approve" ? "Approved for interview" : "Passed"}</span>`
         : `<div class="decision-actions">
-             <button class="decision-btn approve" onclick="setDecision('${r.job_id}','approve')">Approve</button>
-             <button class="decision-btn pass" onclick="setDecision('${r.job_id}','pass')">Pass</button>
+             <button class="decision-btn approve" data-job="${escapeHtml(r.job_id)}" data-decision="approve">Approve</button>
+             <button class="decision-btn pass" data-job="${escapeHtml(r.job_id)}" data-decision="pass">Pass</button>
            </div>`;
       const isNew = !renderedIds.has(r.job_id) ? " row-enter" : "";
       return `<tr class="result-row${isNew}">
