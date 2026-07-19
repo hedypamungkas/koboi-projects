@@ -7,5 +7,7 @@ WORKDIR /app
 RUN pip install --no-cache-dir "koboi-agent[api]==0.18.2"
 COPY config ./config
 COPY data ./data
+RUN useradd --create-home --uid 1000 app && mkdir -p /data && touch /data/.dockerkeep && chown -R app:app /app /data
+USER app
 EXPOSE 8000
 CMD ["koboi", "serve", "config/agent.yaml", "--host", "0.0.0.0", "--port", "8000"]

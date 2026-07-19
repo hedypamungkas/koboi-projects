@@ -122,6 +122,13 @@ context:
   strategy: smart_truncation
   max_context_tokens: 8000
 
+# The concierge runs an external command hook (hooks.allow_exec -> open_ticket.py)
+# on post_output, so its containment should match the peer instances (both peers
+# set sandbox.backend: restricted). Was unsandboxed (default passthrough), making
+# the one container that actually execs a script the least contained of the three.
+sandbox:
+  backend: restricted
+
 server:
   enabled: true
   host: "0.0.0.0"
@@ -133,7 +140,11 @@ server:
   # for the employee/frontend caller; the peer instances authenticate /v1/peer/invoke via their
   # inbound_tokens instead. This matches the shipped configs/a2a_*.yaml (all set auth_required: true).
   auth_required: true
-  api_keys: ["${CONCIERGE_API_KEY}"]
+  # Default matches frontend (window.KOBOI_API_KEY || "concierge-smoke-key-1234") and
+  # .env.example, so the demo works even if .env is missing. Without a default the
+  # unset ${CONCIERGE_API_KEY} survives env-substitution as a literal string and the
+  # backend rejects the frontend's hardcoded key with an opaque 401.
+  api_keys: ["${CONCIERGE_API_KEY:concierge-smoke-key-1234}"]
   cors:
     allow_origins: ["http://localhost:3009"]
     expose_headers: ["X-Session-Id"]

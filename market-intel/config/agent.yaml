@@ -138,7 +138,7 @@ jobs:
   webhooks:
     # HMAC-signed (X-Koboi-Signature) terminal-status callback carrying the finished brief.
     # Default local sink so the demo runs offline.
-    - url: "${BRIEF_WEBHOOK_URL:http://localhost:9999/market-brief}"
+    - url: "${BRIEF_WEBHOOK_URL:http://host.docker.internal:9999/market-brief}"
       events: [completed, failed, timed_out]
       secret: "${BRIEF_WEBHOOK_SECRET:}"
       timeout: 15

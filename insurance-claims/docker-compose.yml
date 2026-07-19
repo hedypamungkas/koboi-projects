@@ -1,4 +1,5 @@
-# Beacon Mutual P&C claims triage -- one koboi container (orchestrated DAG) + web UI.
+# Beacon Mutual P&C claims triage -- one koboi container (single-agent; the DAG
+# path is dead config in koboi 0.18.x, see config/agent.yaml) + web UI.
 # API published on host 8007, web on 3007 (8001-8006/3001-3006 are taken by the 6 existing
 # use cases in this repo).
 services:
@@ -10,10 +11,18 @@ services:
     volumes: ["koboi-data:/data"]
     env_file:
       - .env
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/healthz', timeout=2).status == 200 else 1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 20s
   web:
     build: ./frontend
     ports: ["3007:80"]
-    depends_on: [koboi]
+    depends_on:
+      koboi:
+        condition: service_healthy
 
 volumes:
   koboi-data:

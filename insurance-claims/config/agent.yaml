@@ -141,6 +141,15 @@ memory:
 # passthrough). Our tools are plain Python (no subprocess/shell), so containment is inert for them.
 sandbox:
   backend: restricted
+  # Adopted 0.18 hardening for this unattended triage jobs use case (mirrors finance/hr):
+  #   - git_init: per-session workdir seeded as a git repo (audit trail of each triage run).
+  #   - rlimits: POSIX resource caps on any sandboxed subprocess child (restricted.py preexec_fn).
+  git_init: true
+  rlimits:
+    cpu: 300        # seconds; cap a runaway child
+    as_mb: 1024     # address-space cap (MB)
+    fsize_mb: 512   # max file a child may write (MB)
+    nofile: 256     # open file-descriptor cap
 
 server:
   enabled: true
@@ -161,7 +170,7 @@ jobs:
   timeout_seconds: 900
   webhooks:
     # HMAC-signed (X-Koboi-Signature) terminal-status callback to the core claims system.
-    - url: "${CLAIMS_WEBHOOK_URL:http://localhost:9999/claims-triage}"
+    - url: "${CLAIMS_WEBHOOK_URL:http://host.docker.internal:9999/claims-triage}"
       events: [completed, failed, timed_out]
       secret: "${CLAIMS_WEBHOOK_SECRET:}"
       timeout: 15

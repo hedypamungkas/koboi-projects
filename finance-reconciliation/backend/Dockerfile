@@ -8,5 +8,7 @@ COPY src ./src
 RUN pip install --no-cache-dir -e .
 COPY config ./config
 COPY erp_mcp_server.py ./erp_mcp_server.py
+RUN useradd --create-home --uid 1000 app && mkdir -p /data && touch /data/.dockerkeep && chown -R app:app /app /data
+USER app
 EXPOSE 8000
 CMD ["python", "-m", "finance_ext.entrypoint"]

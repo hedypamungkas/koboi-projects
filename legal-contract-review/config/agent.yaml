@@ -44,5 +44,10 @@ server:
   limits:
     max_iterations_cap: 15
 
+# Autonomous jobs require sandbox.backend='restricted' (koboi/server/jobs.py
+# raises PermissionError otherwise) -- without this, any POST /v1/jobs would crash.
+sandbox:
+  backend: restricted
+
 jobs:
   enabled: true
