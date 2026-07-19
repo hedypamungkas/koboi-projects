@@ -74,6 +74,18 @@ context:
   strategy: smart_truncation
   max_context_tokens: 8000
 
+# --- Named provider pool: route the self-healing CRITIC to a distinct client so the model that
+#     makes a claim isn't also the one that verifies it. koboi/facade.py:1454 resolves `critic_llm`
+#     via resolve_llm_spec + create_client (FAIL-SOFT -- warns and reuses the main client if the
+#     build fails). Same gateway/model here so the demo needs no second key; production would point
+#     `critic` at a stronger verifier model.
+providers:
+  critic:
+    provider: "openai"
+    model: "${OPENAI_MODEL}"
+    api_key: "${OPENAI_API_KEY}"
+    base_url: "${OPENAI_BASE_URL:}"
+
 # --- Self-healing: ground coverage claims in the policy + CRITIC-verify repair math ---
 guardrails:
   input: { detect_injection: true }
@@ -93,6 +105,7 @@ self_healing:
   max_turns: 3
   fail_soft: true
   graceful_max_iter: true
+  critic_llm: critic   # CRITIC (tool_verification re-check) runs on the providers.critic client
   triggers:
     tool_error: { repeat_threshold: 2 }
   tool_verification:

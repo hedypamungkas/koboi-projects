@@ -50,6 +50,11 @@ The agent never moves money, so there's nothing to approve mid-flow. `record_rec
 
 ## Deliberate deviations / notes
 
+- **Newly adopted (0.18 feature pass): `self_healing.critic_llm: critic` + `providers.critic`.** The
+  self-healing CRITIC (`tool_verification`'s `calculate` re-check) now runs on a distinct named client
+  (`koboi/facade.py:1454`, fail-soft). Same gateway/model as the chat LLM here, so no second key; production
+  points `providers.critic` at a stronger verifier. CLM-501 still routes to `record_recommendation`.
+
 1. **No `grounding_check` here, on purpose.** This triage is tool-driven -- the load-bearing facts (claim
    record, repair estimate, fraud screen) come from tool *results*, not retrieved RAG chunks.
    `grounding_check` judges faithfulness to retrieved context, so a correct tool-sourced answer scored

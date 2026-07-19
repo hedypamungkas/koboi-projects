@@ -66,6 +66,18 @@ memory:
     min_score: 0.2
     max_facts: 200
 
+# --- Named provider pool: route the self-healing CRITIC (self_consistency / low-grounding
+#     reflection) to a distinct client so the verifier is decoupled from the answering model.
+#     koboi/facade.py:1454 resolves `critic_llm` (FAIL-SOFT -- reuses the main client on any build
+#     error). Same gateway/model here so the demo needs no second key; production points `critic`
+#     at a stronger verifier.
+providers:
+  critic:
+    provider: "openai"
+    model: "${OPENAI_MODEL}"
+    api_key: "${OPENAI_API_KEY}"
+    base_url: "${OPENAI_BASE_URL:}"
+
 # --- Self-healing: consensus-vote the structured churn-risk answer + ground it ---
 guardrails:
   input: { detect_injection: true }
@@ -84,6 +96,7 @@ self_healing:
   enabled: true
   fail_soft: true
   graceful_max_iter: true
+  critic_llm: critic   # reflection / self-consistency critic runs on the providers.critic client
   # P4 self-consistency: sample the structured churn-risk terminal answer N times and aggregate.
   # The single-agent facade path is what runs this (orchestrated use cases can't).
   self_consistency:
