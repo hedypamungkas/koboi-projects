@@ -43,6 +43,11 @@ Copy `.env.example` to `.env` in this directory and fill in your own `OPENAI_API
 
 ## Deviations from the spec docs (and why)
 
+- **Newly adopted (0.18 feature pass): `rag.rerank: true` + `query_rewrite: true` + `hyde: true`.** The
+  hybrid retriever now heuristic-reranks and LLM-rewrites the patient query (incl. HyDE); all reuse the
+  chat client (`koboi/rag/registry.py:486-489`), so no new key. Verified: a non-literal "sharp chest pain
+  when I breathe" lifts the red-flag protocol and trips `flag_urgent_escalation` (`/data/escalations.log`).
+
 Both `docs/04` and the original task brief describe an idealized config; a few of those specifics don't
 match what `koboi/config_models.py` actually validates, or what the running server actually does. Each
 was checked against the source before writing `config/agent.yaml` / `frontend/app.js`:

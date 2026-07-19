@@ -56,6 +56,16 @@ embedding:
 rag:
   enabled: true
   retriever: hybrid
+  # Production-grade retrieval knobs (this is the one RAG use case where they earn their keep --
+  # a patient's phrasing like "sharp chest pain" rarely matches a protocol verbatim).
+  #   - query_rewrite / hyde: koboi/rag/registry.py:486-489 wires these to REUSE the chat LLM
+  #     client (rewrite_client = chat_client) -- no new key. HyDE embeds a hypothetical answer
+  #     doc; the hybrid retriever (semantic half) is what makes that useful.
+  #   - rerank: true = the heuristic RerankerRetriever (keyword-overlap cross-check); a DICT
+  #     would select a real cross-encoder (jina/cohere/local) needing a key/model -- not here.
+  query_rewrite: true
+  hyde: true
+  rerank: true
   # koboi 0.18+ embedding cache so a container restart doesn't re-embed the seed
   # protocol docs (rag.embedding_cache_path). Verified active at runtime: the
   # cache file is written on first run. (rag.document_cache_path only caches
