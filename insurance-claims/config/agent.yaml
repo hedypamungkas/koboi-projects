@@ -77,12 +77,12 @@ context:
 # --- Named provider pool: route the self-healing CRITIC to a distinct client so the model that
 #     makes a claim isn't also the one that verifies it. koboi/facade.py:1454 resolves `critic_llm`
 #     via resolve_llm_spec + create_client (FAIL-SOFT -- warns and reuses the main client if the
-#     build fails). Same gateway/model here so the demo needs no second key; production would point
-#     `critic` at a stronger verifier model.
+#     build fails). Routes the CRITIC at a STRONGER model than the chat LLM (verifier decoupled from
+#     generator) -- default claude-sonnet-5 via ${CRITIC_MODEL}; same gateway/api_key, no second key.
 providers:
   critic:
     provider: "openai"
-    model: "${OPENAI_MODEL}"
+    model: "${CRITIC_MODEL:claude-sonnet-5}"
     api_key: "${OPENAI_API_KEY}"
     base_url: "${OPENAI_BASE_URL:}"
 

@@ -69,12 +69,12 @@ memory:
 # --- Named provider pool: route the self-healing CRITIC (self_consistency / low-grounding
 #     reflection) to a distinct client so the verifier is decoupled from the answering model.
 #     koboi/facade.py:1454 resolves `critic_llm` (FAIL-SOFT -- reuses the main client on any build
-#     error). Same gateway/model here so the demo needs no second key; production points `critic`
-#     at a stronger verifier.
+#     error). Routes the CRITIC at a STRONGER model than the chat LLM (verifier decoupled from
+#     generator) -- default claude-sonnet-5 via ${CRITIC_MODEL}; same gateway/api_key, no second key.
 providers:
   critic:
     provider: "openai"
-    model: "${OPENAI_MODEL}"
+    model: "${CRITIC_MODEL:claude-sonnet-5}"
     api_key: "${OPENAI_API_KEY}"
     base_url: "${OPENAI_BASE_URL:}"
 

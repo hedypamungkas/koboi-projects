@@ -37,9 +37,9 @@ relevant project README's "Deviations" section.
 | 4 | `sandbox.git_init` + `sandbox.rlimits` | `hr-screening`, `finance-reconciliation` | `git_init` seeds each jobs workdir as a git repo (audit trail); `rlimits` = POSIX caps on sandboxed subprocess children. `git` added to both `backend/Dockerfile`s. | Layer 2: `git --version` works in-container; config loads `git_init=True` + rlimits. (seccomp intentionally NOT used — these tools are in-process, so seccomp has no runtime surface.) |
 
 Notes / honest caveats:
-- **Rec 1 critic points at the same gateway/model as the chat LLM** (no second key needed for the demo). The
-  value of a *separate* critic is fully realized in production by pointing `providers.critic` at a stronger
-  model — the wiring is identical.
+- **Rec 1 critic runs on a STRONGER model than the chat LLM** by default (`claude-sonnet-5` via
+  `${CRITIC_MODEL}`, same gateway/api_key so no second key) — the verifier is decoupled from the answering
+  model. Override `CRITIC_MODEL` to point it elsewhere (e.g. `deepseek-r1` for explicit reasoning).
 - **Rec 4 rlimits are defense-in-depth here**: `fetch_resume`/`score_candidate`/`post_journal_entry` run
   in-process (no subprocess), and the finance ERP MCP server is a persistent (non-sandboxed) stdio child. So
   `rlimits`/seccomp apply to no current code path; they earn teeth with a future shell/code-exec tool. `git_init`
