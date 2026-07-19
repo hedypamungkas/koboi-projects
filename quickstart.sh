@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# quickstart.sh — one-shot wizard to run any koboi-projects app end-to-end.
+# quickstart.sh -- one-shot wizard to run any koboi-projects app end-to-end.
 #
 #   curl -fsSL https://raw.githubusercontent.com/hedypamungkas/koboi-projects/main/quickstart.sh | bash
 #   (or:  bash quickstart.sh   from inside a checkout)
@@ -16,12 +16,24 @@
 
 set -uo pipefail
 
+# Pre-scan args for --no-color/--no-utf8 BEFORE colors/glyphs are baked in.
+# Without this these flags are dead: the color/glyph init below runs before
+# the dispatch loop ever sees them (P0-3).
+for _a in "$@"; do
+  case "$_a" in
+    --no-color) export NO_COLOR=1 ;;
+    --no-utf8)  export KOBOI_NO_UTF8=1 ;;
+  esac
+done
+unset _a
+
 # ───────────────────────────────── config ─────────────────────────────────
 REPO_URL="${KOBOI_UC_REPO:-https://github.com/hedypamungkas/koboi-projects.git}"
 REPO_HOME="${KOBOI_UC_HOME:-$HOME/koboi-projects}"
 QHOME="$HOME/.koboi-quickstart"
 LOG_DIR="$QHOME/logs"; LOCK_DIR="$QHOME/locks"
-mkdir -p "$LOG_DIR" "$LOCK_DIR"
+mkdir -p "$LOG_DIR" "$LOCK_DIR" || { echo "cannot create $QHOME (read-only HOME? set KOBOI_UC_HOME)." >&2; exit 1; }
+HAVE_CURL=0   # set by preflight()
 
 # name|title|one-liner|backend_port   (frontend port = backend_port - 5000)
 PROJECTS=(
@@ -58,7 +70,7 @@ fi
 # ────────────────────────────── interactivity ─────────────────────────────
 FORCE_NONINTERACTIVE=0
 # Interactive only when not forced off, stdout is a terminal, and /dev/tty is a
-# usable char device — this is what keeps `curl … | bash` interactive (stdin is
+# usable char device -- this is what keeps `curl ... | bash` interactive (stdin is
 # the script pipe, but /dev/tty is still the user's terminal) while using
 # defaults silently when headless (CI, --yes).
 has_tty() { [ "$FORCE_NONINTERACTIVE" = "0" ] && [ -t 1 ] && [ -c /dev/tty ]; }
@@ -83,7 +95,7 @@ spinner() {
     done
     printf "\r\033[K"
   else
-    printf "  %s …\n" "$msg"
+    printf "  %s ...\n" "$msg"
     while kill -0 "$pid" 2>/dev/null; do sleep 1; done
   fi
 }
@@ -91,7 +103,7 @@ spinner() {
 prompt() {  # prompt "q" "default" -> echoes answer (default on Enter / headless)
   local q="$1" def="${2:-}" var=""
   if has_tty; then
-    printf "%s%s%s " "${C_CYAN}?${R} ${C_BOLD}$q${R}" "${def:+ ${C_DIM}[$def]${R}}" >&2
+    printf "%s%s " "${C_CYAN}?${R} ${C_BOLD}$q${R}" "${def:+ ${C_DIM}[$def]${R}}" >&2
     if ! { IFS= read -r var </dev/tty; } 2>/dev/null; then var=""; fi
   fi
   [ -n "$var" ] || var="$def"; echo "$var"
@@ -105,7 +117,7 @@ prompt_secret() {  # hidden typing
   fi
   echo "$var"
 }
-mask() { local s="$1"; [ ${#s} -le 8 ] && { echo '****'; return; }; printf '%s…%s\n' "${s:0:4}" "${s: -4}"; }
+mask() { local s="$1"; [ ${#s} -le 8 ] && { echo '****'; return; }; printf '%s...%s\n' "${s:0:4}" "${s: -4}"; }
 
 box() {
   local l="$1"; local w=${#l}; local border
@@ -123,10 +135,20 @@ find_row() {
     name="$(proj_field "$row" 1)"; [ "$name" = "$want" ] && { echo "$row"; return 0; }
   done; return 1
 }
-frontend_port() { echo $(( $1 - 5000 )); }
+frontend_port() { [ "$1" -ge 5001 ] 2>/dev/null || die "backend port '$1' too small for frontend_port (need >=5001)."; echo $(( $1 - 5000 )); }
 is_repo_root() { [ -f "$1/hr-screening/docker-compose.yml" ]; }
 # Container name currently bound to host port $1 ("" if none).
 port_holder() { docker ps --format '{{.Names}} {{.Ports}}' 2>/dev/null | grep -E ":${1}->" | awk '{print $1}' | head -1; }
+# True (0) if something is listening on host port $1 that is NOT one of this
+# project's containers -- catches a non-Docker process that would make
+# `docker compose up` fail late after a multi-minute build (P1-3).
+host_port_busy() {
+  local port="$1"
+  [ "$HAVE_CURL" = "1" ] || return 1            # can't probe without curl
+  curl -s -o /dev/null -m 1 "http://localhost:$port/" 2>/dev/null || return 1   # nothing listening (refused/timeout)
+  docker ps --format '{{.Names}} {{.Ports}}' 2>/dev/null | grep -qE ":${port}->" && return 1  # one of our containers
+  return 0                                       # listening + not our container => host process
+}
 # State of a project: healthy | unhealthy | conflict | none
 project_state() {
   local project="$1" backend="$2" code holder
@@ -139,20 +161,35 @@ project_state() {
 }
 
 # ───────────────────────────── locks + cleanup ────────────────────────────
-BG_PID=""; LOCKDIR=""
+BG_PID=""; LOCKDIR=""; LOCKDIRS=()
 acq_lock() {
   local project="$1"; LOCKDIR="$LOCK_DIR/$project"
-  mkdir "$LOCKDIR" 2>/dev/null || die "another quickstart is already managing '$project'.
+  if ! mkdir "$LOCKDIR" 2>/dev/null; then
+    # Stale-lock recovery: if the recorded holder PID is gone, reclaim it.
+    if [ -f "$LOCKDIR/pid" ] && ! kill -0 "$(cat "$LOCKDIR/pid" 2>/dev/null)" 2>/dev/null; then
+      warn "removing stale lock for '$project' (holder process no longer running)."
+      rm -rf "$LOCKDIR"; mkdir "$LOCKDIR" 2>/dev/null \
+        || die "could not reclaim lock dir \"$LOCKDIR\"."
+    else
+      die "another quickstart is already managing '$project'.
 If you are sure none is running, clear the stale lock:  rm -rf \"$LOCKDIR\""
+    fi
+  fi
+  echo "$$" > "$LOCKDIR/pid"
+  LOCKDIRS+=("$LOCKDIR")
 }
 cleanup() {
   [ -n "${BG_PID:-}" ] && kill "$BG_PID" 2>/dev/null
   wait "$BG_PID" 2>/dev/null
-  [ -n "${LOCKDIR:-}" ] && [ -d "${LOCKDIR:-}" ] && rmdir "${LOCKDIR:-}" 2>/dev/null
+  local d
+  for d in ${LOCKDIRS[@]+"${LOCKDIRS[@]}"}; do
+    [ -n "$d" ] && [ -d "$d" ] && rm -rf "$d" 2>/dev/null
+  done
 }
 trap cleanup EXIT
 trap 'cleanup; exit 130' INT
 trap 'cleanup; exit 143' TERM
+trap 'cleanup; exit 129' HUP
 trap '' PIPE                      # don't die/noise when output is piped to `head`/`grep`
 # EPIPE-tolerant writer for bulk loops (so `--list | head` exits clean).
 emit() { printf "$@" 2>/dev/null || true; }
@@ -173,23 +210,30 @@ EOF
   fi
   docker compose version >/dev/null 2>&1 || die "Docker is installed but the 'docker compose' v2 plugin is missing (https://docs.docker.com/compose/install/)."
   docker info >/dev/null 2>&1 || die "Docker daemon is not running. Start Docker Desktop (macOS/Windows) or 'sudo systemctl start docker' (Linux)."
-  if ! command -v curl >/dev/null 2>&1; then warn "curl not found — health checks + tarball fallback disabled."; fi
-  if ! command -v git >/dev/null 2>&1; then warn "git not found — will use a tarball download if the repo needs cloning."; fi
+  if command -v curl >/dev/null 2>&1; then HAVE_CURL=1; else
+    HAVE_CURL=0; warn "curl not found -- health checks will be skipped and the tarball clone fallback is unavailable (git clone still works)."
+  fi
+  if ! command -v git >/dev/null 2>&1; then warn "git not found -- will use a tarball download if the repo needs cloning."; fi
   ok "Docker ready (compose $(docker compose version --short 2>/dev/null || echo v2))."
 }
 
 # ─────────────────────────── bootstrap: repo ──────────────────────────────
 tarball_url() { echo "${REPO_URL%.git}/archive/refs/heads/main.tar.gz"; }
-# clone_repo <dest> — git first, tarball fallback (works without git / behind simple firewalls).
+# clone_repo <dest> -- git first, tarball fallback (works without git / behind simple firewalls).
 clone_repo() {
   local dest="$1" tmp inner
   if command -v git >/dev/null 2>&1 && git clone --depth 1 "$REPO_URL" "$dest" >/dev/null 2>&1; then return 0; fi
   command -v curl >/dev/null 2>&1 || die "need git or curl to fetch the repo (neither found)."
-  warn "git clone unavailable; downloading tarball…"
+  warn "git clone unavailable; downloading tarball..."
   tmp="$(mktemp -d)" || die "mktemp failed."
   curl -fsSL "$(tarball_url)" -o "$tmp/repo.tgz" || { rm -rf "$tmp"; die "download failed ($(tarball_url)). Is the repo published? Set KOBOI_UC_REPO to your fork."; }
   tar -xzf "$tmp/repo.tgz" -C "$tmp" 2>/dev/null || { rm -rf "$tmp"; die "tarball extract failed."; }
-  inner="$(ls -1 "$tmp" | grep -v '^repo\.tgz$' | head -1)"
+  inner=""
+  for _d in "$tmp"/*; do
+    [ "$(basename "$_d")" = "repo.tgz" ] && continue   # SC2010: glob, not ls|grep
+    inner="$(basename "$_d")"; break
+  done
+  unset _d
   [ -n "$inner" ] || { rm -rf "$tmp"; die "unexpected tarball layout."; }
   mv "$tmp/$inner" "$dest" 2>/dev/null || { rm -rf "$tmp"; die "cannot move repo into $dest."; }
   rm -rf "$tmp"; return 0
@@ -200,7 +244,7 @@ bootstrap_repo() {
   if is_repo_root "$REPO_HOME"; then
     REPO_ROOT="$REPO_HOME"
     if has_tty && [ "$(prompt "Update existing checkout at $REPO_ROOT with git pull?" "Y/n")" != "n" ]; then
-      git -C "$REPO_ROOT" pull --ff-only >/dev/null 2>&1 && ok "Updated." || warn "pull failed — continuing with existing files."
+      git -C "$REPO_ROOT" pull --ff-only >/dev/null 2>&1 && ok "Updated." || warn "pull failed -- continuing with existing files."
     fi; return 0
   fi
   if has_tty && [ "$(prompt "Clone koboi-projects to $REPO_HOME?" "Y/n")" = "n" ]; then die "No repo available."; fi
@@ -210,7 +254,7 @@ bootstrap_repo() {
 resolve_repo_root() {
   if is_repo_root "$PWD"; then REPO_ROOT="$PWD"
   elif is_repo_root "$REPO_HOME"; then REPO_ROOT="$REPO_HOME"
-  else die "not inside a checkout and no clone at $REPO_HOME — run 'quickstart.sh' (wizard) first."; fi
+  else die "not inside a checkout and no clone at $REPO_HOME -- run 'quickstart.sh' (wizard) first."; fi
 }
 
 # ───────────────────────────── write .env ─────────────────────────────────
@@ -228,6 +272,8 @@ write_env() {
   local out="" key val def OPENAI_KEY_V="" OPENAI_BASE_V="" line
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in ''|\#*) out="$out$line"$'\n'; continue;; esac
+    # A line without '=' would otherwise be written back as KEY=KEY (P1-5).
+    if [[ "$line" != *=* ]]; then warn "ignoring line without '=' in .env.example: $line"; continue; fi
     key="${line%%=*}"; val="${line#*=}"
     if [ -n "$val" ]; then
       out="$out$key=$val"$'\n'
@@ -238,7 +284,7 @@ write_env() {
       OPENAI_API_KEY)
         [ -n "${OPENAI_API_KEY:-}" ] && def="${OPENAI_API_KEY}" || def=""
         val="$(prompt_secret "OPENAI_API_KEY (required for live LLM)")"; [ -n "$val" ] || val="$def"
-        [ -n "$val" ] || warn "empty OPENAI_API_KEY — app boots but live chat will fail."
+        [ -n "$val" ] || warn "empty OPENAI_API_KEY -- app boots but live chat will fail."
         OPENAI_KEY_V="$val" ;;
       OPENAI_MODEL)     val="$(prompt "OPENAI_MODEL" "${OPENAI_MODEL:-gpt-4o-mini}")" ;;
       OPENAI_BASE_URL)  val="$(prompt "OPENAI_BASE_URL (blank = public OpenAI)" "${OPENAI_BASE_URL:-}")"; OPENAI_BASE_V="$val" ;;
@@ -250,6 +296,12 @@ write_env() {
   done < "$ex"
   printf '%s' "$out" > "$envfile" || die "cannot write $envfile (read-only checkout? run from your own clone)."
   chmod 600 "$envfile" 2>/dev/null || true
+  # chmod is a no-op on some filesystems (FAT/exFAT, some CIFS mounts); read the
+  # mode back and warn loudly if the secrets file isn't actually 600 (P1-6).
+  local mode; mode="$(stat -f '%Lp' "$envfile" 2>/dev/null || stat -c '%a' "$envfile" 2>/dev/null || true)"
+  if [ -n "$mode" ] && [ "$mode" != "600" ]; then
+    warn "$project/.env is mode $mode (not 600) -- this filesystem may not honor chmod; OPENAI_API_KEY could be world-readable. Move the checkout off this filesystem."
+  fi
   ok "Wrote $project/.env"
 }
 
@@ -270,7 +322,11 @@ up_project() {
     die "port for $project is already in use by container '$h' (not $project).
 Stop it ('docker rm -f $h' or 'quickstart.sh --down <other-project>') or pick another project."
   done
-  step "Building + starting $project (first run pulls koboi-agent; ~1–3 min)"
+  # Host-process port occupancy (a non-Docker process docker can't see).
+  if host_port_busy "$backend" || host_port_busy "$(frontend_port "$backend")"; then
+    die "a host process is already listening on $project's port ($backend/$(frontend_port "$backend")) -- docker can't bind it. Stop that process or pick another project."
+  fi
+  step "Building + starting $project (first run pulls koboi-agent; ~1-3 min)"
   printf "  ${C_DIM}logs: %s${R}\n" "$log"
   : > "$log"
   ( compose up -d --build >"$log" 2>&1 ) &
@@ -288,10 +344,14 @@ Stop it ('docker rm -f $h' or 'quickstart.sh --down <other-project>') or pick an
 wait_health() {  # returns 0 healthy, 1 timed out
   local backend="$1" i code
   step "Waiting for koboi to be healthy on :$backend"
+  if [ "$HAVE_CURL" = "0" ]; then
+    warn "curl missing -- cannot probe /healthz; waiting 15s and assuming the container started."
+    sleep 15; return 0
+  fi
   for i in $(seq 1 90); do
     code="$(curl -s -o /dev/null -w '%{http_code}' -m 2 "http://localhost:$backend/healthz" 2>/dev/null || echo 000)"
     if [ "$code" = "200" ]; then [ -t 1 ] && printf "\r\033[K"; ok "Healthy (:$backend/healthz ${G_ARR} 200)."; return 0; fi
-    [ -t 1 ] && printf "\r  ${C_DIM}waiting… (%2ds, http=%s)${R}" "$((i*2))" "$code"
+    [ -t 1 ] && printf "\r  ${C_DIM}waiting... (%2ds, http=%s)${R}" "$((i*2))" "$code"
     sleep 2
   done
   [ -t 1 ] && printf "\r\033[K"; return 1
@@ -299,6 +359,7 @@ wait_health() {  # returns 0 healthy, 1 timed out
 
 handle_unhealthy() {
   local project="$1" backend="$2"
+  local log="$LOG_DIR/$project.log"   # separate statement: $project isn't visible mid-local
   echo; warn "$project did not become healthy on :$backend within ~180s."
   if has_tty; then
     while true; do
@@ -312,7 +373,7 @@ handle_unhealthy() {
       esac
     done
   fi
-  printf "  ${C_DIM}logs: %s — containers left running; inspect with 'quickstart.sh --logs %s'.${R}\n" "$log" "$project" >&2
+  printf "  ${C_DIM}logs: %s -- containers left running; inspect with 'quickstart.sh --logs %s'.${R}\n" "$log" "$project" >&2
   exit 1
 }
 
@@ -320,7 +381,10 @@ print_summary() {
   local project="$1" backend="$2"
   local front; front="$(frontend_port "$backend")"
   local key=""
-  [ -f "$REPO_ROOT/$project/.env" ] && key="$(grep -E '^CONCIERGE_API_KEY=' "$REPO_ROOT/$project/.env" 2>/dev/null | cut -d= -f2 || true)"
+  if [ -f "$REPO_ROOT/$project/.env" ]; then
+    local _line; _line="$(grep -E '^CONCIERGE_API_KEY=' "$REPO_ROOT/$project/.env" 2>/dev/null | head -1 || true)"
+    key="${_line#CONCIERGE_API_KEY=}"   # parameter expansion (cut -f2 mangles keys containing '=')
+  fi
   echo; box "$project is up"
   cat <<EOF
   ${C_BOLD}Web UI${R}   http://localhost:$front       ${C_DIM}(open this in your browser)${R}
@@ -346,7 +410,7 @@ monitor_menu() {
          printf "\n  ${C_DIM}(open http://localhost:$front to chat)${R}\n" ;;
       o|b) ( command -v open >/dev/null && open "http://localhost:$front" ) \
            || ( command -v xdg-open >/dev/null && xdg-open "http://localhost:$front" ) \
-           || warn "no opener — visit http://localhost:$front manually." ;;
+           || warn "no opener -- visit http://localhost:$front manually." ;;
       n) main_wizard; return ;;
       s|d) compose down >/dev/null 2>&1; ok "stopped $project"; return ;;
       q|x|"") return ;;
@@ -364,7 +428,7 @@ pick_project() {
     name="$(proj_field "$row" 1)"; title="$(proj_field "$row" 2)"; sub="$(proj_field "$row" 3)"; back="$(proj_field "$row" 4)"
     if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${name}-"; then mark="${C_GREEN}${G_BUL}running${R}"; else mark="${C_DIM}${G_DOT}${R}"; fi
     printf "  ${C_BOLD}%-2d${R} %-24s %-12s ${C_DIM}:%s/%s${R}\n" "$idx" "$name" "$mark" "$(frontend_port "$back")" "$back"
-    printf "     ${C_DIM}%s — %s${R}\n" "$title" "$sub"
+    printf "     ${C_DIM}%s -- %s${R}\n" "$title" "$sub"
   done
   local choice
   choice="$(prompt "Number [1-${#PROJECTS[@]}]" "")"
@@ -393,7 +457,7 @@ run_project() {
     conflict)
       local h; h="$(port_holder "$backend")"; [ -n "$h" ] || h="$(port_holder "$(frontend_port "$backend")")"
       die "port for $project is held by '$h' (not $project). Stop it first or pick another project." ;;
-    unhealthy) warn "$project containers exist but are not healthy; restarting…"; compose down >/dev/null 2>&1 ;;
+    unhealthy) warn "$project containers exist but are not healthy; restarting..."; compose down >/dev/null 2>&1 ;;
   esac
   write_env "$project"
   up_project "$project" "$backend"
@@ -443,7 +507,7 @@ cmd_update() { resolve_repo_root; git -C "$REPO_ROOT" pull --ff-only >/dev/null 
 
 usage() {
   cat <<EOF
-${C_BOLD}koboi-projects quickstart${R} — run any of the 10 apps in one command.
+${C_BOLD}koboi-projects quickstart${R} -- run any of the 10 apps in one command.
 
 ${C_BOLD}Usage:${R}
   quickstart.sh                       interactive wizard (default)
@@ -464,7 +528,9 @@ EOF
 PROJECT_FLAG=""; YES=0
 while [ $# -gt 0 ]; do
   case "$1" in
-    --project) PROJECT_FLAG="${2:-}"; shift 2;;
+    --project)
+      [ $# -ge 2 ] || die "--project requires a project name (try --list)."
+      PROJECT_FLAG="$2"; shift 2;;
     --yes|-y) YES=1; FORCE_NONINTERACTIVE=1; shift;;
     --no-color) export NO_COLOR=1; shift;;
     --no-utf8) export KOBOI_NO_UTF8=1; shift;;
@@ -480,11 +546,21 @@ done
 
 # validate project name early (before any Docker work)
 if [ -n "$PROJECT_FLAG" ]; then find_row "$PROJECT_FLAG" >/dev/null || die "unknown project '$PROJECT_FLAG' (--list shows names)."; fi
+# --yes is only meaningful with --project; otherwise pick_project dies with an opaque "invalid choice ''".
+[ "$YES" = "1" ] && [ -z "$PROJECT_FLAG" ] && die "--yes requires --project <name> (try --list)."
 
 banner() {
-  printf "\n${C_BOLD}${C_CYAN}╔══════════════════════════════════════════════════════╗${R}\n"
-  printf "${C_BOLD}${C_CYAN}║   koboi-projects quickstart — pick • configure • run  ║${R}\n"
-  printf "${C_BOLD}${C_CYAN}╚══════════════════════════════════════════════════════╝${R}\n\n"
+  # Guard the whole banner with is_utf8 (the rest of the script uses guarded
+  # glyph vars, but this previously hardcoded Unicode -> mojibake on non-UTF8).
+  if is_utf8; then
+    printf "\n${C_BOLD}${C_CYAN}╔══════════════════════════════════════════════════════╗${R}\n"
+    printf "${C_BOLD}${C_CYAN}║   koboi-projects quickstart - pick, configure, run    ║${R}\n"
+    printf "${C_BOLD}${C_CYAN}╚══════════════════════════════════════════════════════╝${R}\n\n"
+  else
+    printf "\n${C_BOLD}${C_CYAN}========================================================${R}\n"
+    printf "${C_BOLD}${C_CYAN}   koboi-projects quickstart - pick, configure, run     ${R}\n"
+    printf "${C_BOLD}${C_CYAN}========================================================${R}\n\n"
+  fi
 }
 banner
 if [ -n "$PROJECT_FLAG" ]; then
