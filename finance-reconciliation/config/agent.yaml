@@ -36,6 +36,18 @@ mcp:
 
 sandbox:
   backend: restricted
+  # Adopted 0.18 hardening for this unattended jobs use case:
+  #   - git_init: koboi/sandbox/pool.py seeds the per-session workdir as a git repo (audit trail
+  #     of each reconciliation run's working files). git is installed in backend/Dockerfile.
+  #   - rlimits: POSIX resource caps on any sandboxed subprocess child (restricted.py preexec_fn).
+  #     post_journal_entry runs in-process and the ERP MCP server is a persistent (non-sandboxed)
+  #     stdio child, so these are defense-in-depth here; real teeth come with a shell/code-exec tool.
+  git_init: true
+  rlimits:
+    cpu: 300        # seconds; cap a runaway child (none today)
+    as_mb: 1024     # address-space cap (MB)
+    fsize_mb: 512   # max file a child may write (MB)
+    nofile: 256     # open file-descriptor cap
 
 server:
   auth_required: false   # simplified for this local smoke-test POC -- production would set this true
