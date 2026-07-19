@@ -39,9 +39,15 @@ policy:
         role: "*root*"
       action: deny
 
-# Accept inbound peer calls from the front-door concierge (token "tok-it").
+# Accept inbound peer calls from the front-door concierge (token "tok-it"). Verified-A2A: this
+# instance advertises a signed agent-card (built from org + org_secret + public_base_url) so the
+# concierge's verify_all can HMAC-check its org-claim. Same A2A_ORG_SECRET as the concierge;
+# public_base_url hostname MUST equal what peers fetch here (http://peer-it:8000 -> peer-it).
 peers:
   enabled: true
+  org: northwind
+  org_secret: "${A2A_ORG_SECRET:}"
+  public_base_url: "http://peer-it:8000"
   allow_private_network: true
   inbound_tokens:
     - "${PEER_IT_TOKEN:tok-it}"
