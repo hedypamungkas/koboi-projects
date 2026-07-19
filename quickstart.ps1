@@ -11,7 +11,7 @@ $ErrorActionPreference = "Stop"
 
 # Same raw URL as quickstart.sh expects. Override: $env:KOBOI_UC_RAW
 if (-not $env:KOBOI_UC_RAW) {
-    $env:KOBOI_UC_RAW = "https://raw.githubusercontent.com/mekari/koboi-use-cases/main/quickstart.sh"
+    $env:KOBOI_UC_RAW = "https://raw.githubusercontent.com/hedypamungkas/koboi-projects/main/quickstart.sh"
 }
 
 function Write-Step($m) { Write-Host "=> $m" -ForegroundColor Cyan }
