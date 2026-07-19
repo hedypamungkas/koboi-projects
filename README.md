@@ -7,6 +7,42 @@ business logic — built by **consuming** koboi-agent as a dependency, never for
 point: **koboi is easy to start with what's built in, and just as easy for an enterprise to extend when the
 business needs something custom.** Same codebase, both stories.
 
+## Quickstart (one command)
+
+The fastest way to try any of the ten apps. A small wizard checks Docker, clones this repo, writes the
+`.env` (asking for your OpenAI/gateway key), builds, starts, and prints the URL — then you just use the app
+in your browser. Requires **Docker** ([Docker Desktop](https://docs.docker.com/desktop/) for macOS/Windows,
+or Docker Engine + the compose plugin on Linux).
+
+**macOS / Linux** (run from anywhere):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/<owner>/<repo>/main/quickstart.sh | bash
+```
+
+**Windows** (PowerShell — the launcher finds WSL2 or Git Bash for you):
+
+```powershell
+irm https://raw.githubusercontent.com/<owner>/<repo>/main/quickstart.ps1 | iex
+```
+
+> Replace `<owner>/<repo>` with this repo's path once published. Until then, run the local copy:
+> `bash quickstart.sh` (macOS/Linux/Git Bash/WSL) or
+> `powershell -ExecutionPolicy Bypass -File quickstart.ps1` (Windows).
+
+The wizard picks a use case, shows live build/startup progress, waits for the health check, and prints the
+Web UI + API URLs. It also runs headlessly for automation:
+
+```sh
+OPENAI_API_KEY=sk-... bash quickstart.sh --project hr-screening --yes   # one project, no prompts
+```
+
+Other commands: `--list` (projects + ports), `--status` (what's running + health),
+`--logs <project>`, `--down <project> [--purge]`, `--update`, `--help`.
+
+Prefer the manual path? Each project directory has its own `README.md` with exact `docker compose` +
+`curl` smoke-test steps, and [`TEST.md`](TEST.md) is the full layered reproduction runbook.
+
 ## Start here
 
 [`docs/00-consuming-koboi-server.md`](docs/00-consuming-koboi-server.md) — the shared contract every app
