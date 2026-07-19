@@ -232,7 +232,7 @@ server:
 That's the whole contract. Everything past this point in each sector doc is what makes that business
 different: which tools it needs, what its UI looks like, and where the "built-in vs. custom" line falls.
 
-**Everything on this page has been verified against a real, running build** — all 6 apps are built, in the
+**Everything on this page has been verified against a real, running build** — all 10 apps are built, in the
 sibling project directories (`../ecommerce-support/`, `../hr-screening/`, etc.), each with a working
 `docker-compose.yml` and a `README.md` documenting the couple of sector-specific details that came up when
 actually running it. If something here and a sector doc ever disagree, the running project's README is the

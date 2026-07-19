@@ -56,7 +56,19 @@ first failure. The scripts below assume the sibling koboi-agent venv at `../kobo
 ### Layer 1 — mock / unit (no containers, no LLM, ~2s)
 
 Catches the vast majority of regressions: a config that won't parse, a `@tool` with a bad JSON-schema, a
-syntax error. Run from the repo root with the env vars the `${...}` placeholders expect:
+syntax error. **Run the automated harness** (119 tests, <2s) — it codifies everything below plus the
+post-release hardening (concurrency safety, input validation, XSS escaping, compose healthchecks,
+non-root Dockerfiles, installer edge cases):
+
+```bash
+PY=../koboi-agent/.venv/bin/python
+$PY -m pytest -q                      # all green = Layer 1 passes
+bash -n quickstart.sh                 # installer syntax
+shellcheck -S warning quickstart.sh   # installer lint (if shellcheck installed)
+```
+
+The manual snippets below are the same checks the harness automates, kept for transparency / running a
+single check by hand. Run from the repo root with the env vars the `${...}` placeholders expect:
 
 ```bash
 export OPENAI_API_KEY=sk OPENAI_MODEL=m OPENAI_BASE_URL=http://x EMBEDDING_API_KEY=sk EMBEDDING_BASE_URL=http://x \
