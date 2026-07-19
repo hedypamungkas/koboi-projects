@@ -48,6 +48,10 @@ not a `Hook` ABC subclass instance. `entrypoint.py`'s `_as_extra_hook(hook)` ret
 
 ## Deviations from the spec doc worth flagging
 
+- **Newly adopted (0.18 feature pass): `sandbox.git_init: true` + `sandbox.rlimits`.** `git_init` seeds each
+  jobs workdir as a git repo (audit trail); `rlimits` caps any sandboxed subprocess child. `git` is installed
+  in `backend/Dockerfile`. rlimits are defense-in-depth here (scoring tools run in-process, no subprocess).
+
 1. **`ctx.tool_arguments` is a JSON string, not a dict.** `docs/02`'s sample hook does
    `ctx.tool_arguments["resume_id"]` directly. Verified against the installed
    `koboi.hooks.chain.HookContext` (`tool_arguments: str | None`) and `koboi.types.ToolCall.arguments: str`

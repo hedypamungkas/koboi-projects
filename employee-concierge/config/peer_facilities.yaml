@@ -24,8 +24,14 @@ tools:
   custom:
     - module: concierge_ext.facilities_tools
 
+# Verified-A2A: advertises a signed agent-card (org + org_secret + public_base_url) so the
+# concierge's verify_all can HMAC-check this peer's org-claim. Same A2A_ORG_SECRET as the concierge;
+# public_base_url hostname MUST equal what peers fetch here (http://peer-facilities:8000).
 peers:
   enabled: true
+  org: northwind
+  org_secret: "${A2A_ORG_SECRET:}"
+  public_base_url: "http://peer-facilities:8000"
   allow_private_network: true
   inbound_tokens:
     - "${PEER_FACILITIES_TOKEN:tok-fac}"

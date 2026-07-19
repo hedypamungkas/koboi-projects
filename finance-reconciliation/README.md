@@ -19,6 +19,11 @@ what's specific to running this build, plus the deliberate simplifications made 
 
 ## Deliberate deviations from the design doc
 
+- **Newly adopted (0.18 feature pass): `sandbox.git_init: true` + `sandbox.rlimits`.** `git_init` seeds each
+  jobs workdir as a git repo (audit trail); `rlimits` caps any sandboxed subprocess child. `git` is installed
+  in `backend/Dockerfile`. Both are defense-in-depth here (`post_journal_entry` is in-process and the ERP MCP
+  server is a persistent, non-sandboxed stdio child) -- real teeth arrive with a shell/code-exec tool.
+
 The design doc describes a fuller, more "production" shape than this POC runs, for two reasons documented
 here plainly (not mistakes):
 

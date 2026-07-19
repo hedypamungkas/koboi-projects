@@ -45,6 +45,11 @@ route human judgment through `transfer_to_human` + `policy.rules` instead.)
 
 ## Deliberate deviations / notes
 
+- **Newly adopted (0.18 feature pass): `self_healing.critic_llm: critic` + `providers.critic`.** The
+  self-healing CRITIC (self_consistency / low-grounding reflection) now runs on a distinct named client
+  (fail-soft), pointed at a STRONGER model than the chat LLM (default `claude-sonnet-5` via
+  `${CRITIC_MODEL}`, same gateway/api_key, no second key) -- the verifier is decoupled from the generator.
+
 1. **`media` uses the `mock` image provider** so the build runs offline. The `generate_image` tool surfaces
    when `media.enabled` is true; live-verify the exact tool surfacing in your environment if QBR image
    generation is load-bearing. A real provider (e.g. provider-specific image API key) replaces `mock`.

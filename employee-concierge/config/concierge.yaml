@@ -55,10 +55,17 @@ tools:
   builtin: [call_peer_agent, transfer_to_human]
 
 # --- Cross-instance A2A: the department peers this front door can call ---
-# No org_secret here (unverified peers, static bearer) so the front door does not hard-fail at
-# boot if a peer is briefly down -- production would add org_secret for verified-only calls.
+# Verified-only peers (P3): a shared HMAC org_secret (peers.org_secret) makes each declared peer
+# prove same-org membership via its signed agent-card before it's callable. koboi/server/peers.py
+# verify_all runs at startup and is NON-FATAL -- an unreachable/unverified peer is dropped + warned
+# (uncallable), not a boot crash, so a briefly-down peer no longer breaks the front door. All three
+# instances share A2A_ORG_SECRET; public_base_url must match the hostname a peer fetches this card
+# at (audience binding, peers.py:196). See peer_it.yaml / peer_facilities.yaml for the inbound side.
 peers:
   enabled: true
+  org: northwind
+  org_secret: "${A2A_ORG_SECRET:}"
+  public_base_url: "http://concierge:8000"
   allow_private_network: true   # peers live on the compose private network (http://peer-it:8000)
   peers:
     - name: IT

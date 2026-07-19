@@ -55,12 +55,17 @@ peers over the compose network at `http://peer-it:8000` / `http://peer-facilitie
 
 ## Deliberate deviations / notes
 
-- **Unverified peers (static bearer), not `org_secret`.** Static `inbound_token` per peer (modelled on
-  `a2a_dag_remote.yaml`), not the `org_secret` HMAC-verified flow. Reason: `org_secret` fetches + verifies
-  each peer's agent-card at startup, which races with compose start-order. Production adds `org_secret`.
-- **Startup order.** Compose `depends_on` waits for *start*, not *readiness*. The configs bring peers up
-  first; if the concierge's first `call_peer_agent` lands before a peer serves, that call fails and the
-  concierge falls back to `transfer_to_human` (verified) -- retry to complete.
+- **Verified-A2A (`org_secret`) is now enabled** (was static bearer). All three instances share
+  `A2A_ORG_SECRET` (`.env`); each advertises a signed agent-card (`org` + `org_secret` + `public_base_url`),
+  and the concierge's `verify_all` HMAC-checks every peer's org-claim at startup before it's callable
+  (verified-only). `verify_all` is **non-fatal** (`koboi/server/peers.py:139-160`) -- an unreachable or
+  unverified peer is dropped + warned ("uncallable"), not a boot crash, which is exactly what lets us turn
+  this on despite the compose start-order race below. Verified: each peer's `/.well-known/agent-card`
+  HMAC-verifies True; `call_peer_agent` -> peer-it `POST /v1/peer/invoke 200 OK`.
+- **Startup order still matters for the *first* call.** Compose `depends_on` waits for *start*, not
+  *readiness*. If `verify_all` runs before a peer serves its card, that peer is unverified + uncallable and
+  the first `call_peer_agent` to it fails -> the concierge falls back to `transfer_to_human` (verified) --
+  restart the concierge to re-verify, then retry.
 - **Command hook is fire-and-forget.** `open_ticket.py` writes `/data/tickets.jsonl`; `abort_on_error:
   false` + `fire_and_forget: true` mean a slow ITSM never breaks the loop.
 

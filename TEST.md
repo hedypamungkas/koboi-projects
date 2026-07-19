@@ -23,6 +23,30 @@ then does the slow, real-LLM end-to-end pass run. Run the layers in order — st
 - Always `docker compose down` a project before moving to the next, so stopped-but-not-removed containers
   don't accumulate.
 
+## Newly-adopted 0.18 features (this pass)
+
+A fit-mapping pass identified four real, wired koboi 0.18.x features that no use case exercised, each with a
+domain-driven fit. All four are now adopted, layered-verified (Layers 1-3 below), and documented in the
+relevant project README's "Deviations" section.
+
+| # | Feature (config knob) | Use case | What it does here | Verification signal |
+|---|---|---|---|---|
+| 1 | `self_healing.critic_llm` + `providers:` | `insurance-claims`, `customer-success` | Routes the self-healing CRITIC (insurance `tool_verification`, CS `self_consistency`) to a distinct named client so the verifier is decoupled from the answering model. Fail-soft (`koboi/facade.py:1454`). | Layer 2: no `critic_llm resolve/build failed` warning at boot. Layer 3: CLM-501 still → `record_recommendation` (amount persisted). |
+| 2 | `rag.rerank` + `query_rewrite` + `hyde` | `healthcare-intake` | Heuristic rerank + LLM query rewrite + HyDE on the hybrid retriever (reuses the chat client, no new key — `koboi/rag/registry.py:486-489`). Clinical symptom→protocol retrieval is where these earn their keep. | Layer 3: "sharp chest pain when I breathe" lifts the red-flag protocol → `flag_urgent_escalation` fires (see `/data/escalations.log`). |
+| 3 | `peers.org_secret` verified-A2A | `employee-concierge` (all 3 configs) | Shared HMAC secret makes each peer prove same-org membership via its signed agent-card before it's callable. `verify_all` is **non-fatal** — an unverified peer is dropped + warned, not a boot crash (`koboi/server/peers.py:139-160`). `A2A_ORG_SECRET` added to `.env`/`.env.example`. | Layer 2: each peer's `/.well-known/agent-card` HMAC-verifies True. Layer 3: `call_peer_agent` → peer-it `POST /v1/peer/invoke 200 OK`. |
+| 4 | `sandbox.git_init` + `sandbox.rlimits` | `hr-screening`, `finance-reconciliation` | `git_init` seeds each jobs workdir as a git repo (audit trail); `rlimits` = POSIX caps on sandboxed subprocess children. `git` added to both `backend/Dockerfile`s. | Layer 2: `git --version` works in-container; config loads `git_init=True` + rlimits. (seccomp intentionally NOT used — these tools are in-process, so seccomp has no runtime surface.) |
+
+Notes / honest caveats:
+- **Rec 1 critic runs on a STRONGER model than the chat LLM** by default (`claude-sonnet-5` via
+  `${CRITIC_MODEL}`, same gateway/api_key so no second key) — the verifier is decoupled from the answering
+  model. Override `CRITIC_MODEL` to point it elsewhere (e.g. `deepseek-r1` for explicit reasoning).
+- **Rec 4 rlimits are defense-in-depth here**: `fetch_resume`/`score_candidate`/`post_journal_entry` run
+  in-process (no subprocess), and the finance ERP MCP server is a persistent (non-sandboxed) stdio child. So
+  `rlimits`/seccomp apply to no current code path; they earn teeth with a future shell/code-exec tool. `git_init`
+  is the one piece with real effect today (it seeds the workdir repo on every job).
+- The deeper runtime confirmation of rerank (the `retrieval_method` stamp, e.g. `rerank:heuristic`, in
+  `complete.metadata.rag_results`) is a future check; Layers 1-3 here prove config + wiring + correct behavior.
+
 ## Testing in layers
 
 Run these in order. Each layer is progressively slower and more expensive (real LLM calls); stop at the
@@ -39,7 +63,7 @@ export OPENAI_API_KEY=sk OPENAI_MODEL=m OPENAI_BASE_URL=http://x EMBEDDING_API_K
   CLAIMS_WEBHOOK_URL=http://x CLAIMS_WEBHOOK_SECRET=s BRIEF_WEBHOOK_URL=http://x BRIEF_WEBHOOK_SECRET=s \
   CRM_WEBHOOK_URL=http://x CRM_WEBHOOK_SECRET=s WEB_SEARCH_PROVIDER=mock WEB_FETCH_PROVIDER=httpx \
   BRAVE_API_KEY=b FIRECRAWL_API_KEY=f PEER_IT_URL=http://x PEER_FACILITIES_URL=http://x \
-  PEER_IT_TOKEN=t PEER_FACILITIES_TOKEN=t CONCIERGE_API_KEY=k
+  PEER_IT_TOKEN=t PEER_FACILITIES_TOKEN=t CONCIERGE_API_KEY=k A2A_ORG_SECRET=d
 PY=../koboi-agent/.venv/bin/python
 
 # 1a. every config parses against Config.from_yaml (koboi 0.18.2 strict schema)

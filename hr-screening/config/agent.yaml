@@ -53,6 +53,18 @@ memory:
 # the jobs runner's safety gate for unattended runs.
 sandbox:
   backend: restricted
+  # Adopted 0.18 hardening for this unattended jobs use case:
+  #   - git_init: koboi/sandbox/pool.py seeds the per-session workdir as a git repo, so each
+  #     overnight scoring run leaves an auditable repo history of its working files.
+  #   - rlimits: POSIX resource caps applied to any sandboxed subprocess child (restricted.py
+  #     preexec_fn). fetch_resume/score_candidate run in-process (no subprocess), so these are
+  #     defense-in-depth here -- real teeth arrive with a future shell/code-exec tool.
+  git_init: true
+  rlimits:
+    cpu: 300        # seconds; cap a runaway child (none today)
+    as_mb: 1024     # address-space cap (MB)
+    fsize_mb: 512   # max file a child may write (MB)
+    nofile: 256     # open file-descriptor cap
 
 jobs:
   enabled: true
