@@ -1,123 +1,102 @@
-# Finance & Accounting Ops -- Vendor Invoice Reconciliation
+# Finance & Accounting Ops — Vendor Invoice Reconciliation
 
-Runnable build for [`docs/03-finance-invoice-reconciliation.md`](../docs/03-finance-invoice-reconciliation.md)
-(Ledgerline Manufacturing). Read that doc and
-[`docs/00-consuming-koboi-server.md`](../docs/00-consuming-koboi-server.md) first -- this README only covers
-what's specific to running this build, plus the deliberate simplifications made to get it running end to end.
+An overnight invoice reconciliation that matches vendor bills to POs and flags the mismatches — and never posts a journal entry without the controller's explicit click.
 
-## What this demonstrates
+> **Try it:** `curl -fsSL https://raw.githubusercontent.com/hedypamungkas/koboi-projects/main/quickstart.sh | bash` (pick *Finance reconciliation*), or `bash quickstart.sh --project finance-reconciliation` from a checkout. Smoke-test curls at the bottom of this page.
 
-- **MCP as a client** -- koboi connects to `erp_mcp_server.py`, which exposes three read-only ERP lookups
-  (`fetch_invoice`, `fetch_purchase_order`, `three_way_match`). All three default to `RiskLevel.SAFE`
-  (koboi 0.18+ *can* risk-gate an MCP server via `mcp.servers[].risk_level`, but these are read-only on
-  purpose, so SAFE is correct).
-- **A local DESTRUCTIVE tool** -- `post_journal_entry` (`src/finance_ext/tools.py`) is the one write, kept
-  local on purpose so it can carry `RiskLevel.DESTRUCTIVE` and trigger koboi's built-in human-approval pause.
-- **A custom hook** -- `InvoiceAuditHook` (`src/finance_ext/hooks.py`) logs every `PRE_TOOL_USE` /
-  `POST_TOOL_USE` event, from both the local tool and the MCP-sourced tools, to
-  `/data/audit/invoice_audit.jsonl`.
+## What this app does
 
-## Deliberate deviations from the design doc
+koboi connects to Ledgerline's ERP, runs a three-way match (invoice vs. PO vs. delivery) on demand, and writes an append-only audit row for every tool call that runs. Read-only lookups fly with no friction. The one operation that actually moves money — posting a journal entry — is marked `DESTRUCTIVE`, so koboi pauses it, sends a `pending_approval` event, and waits for the controller to approve over chat. The agent never posts on its own.
 
-- **Newly adopted (0.18 feature pass): `sandbox.git_init: true` + `sandbox.rlimits`.** `git_init` seeds each
-  jobs workdir as a git repo (audit trail); `rlimits` caps any sandboxed subprocess child. `git` is installed
-  in `backend/Dockerfile`. Both are defense-in-depth here (`post_journal_entry` is in-process and the ERP MCP
-  server is a persistent, non-sandboxed stdio child) -- real teeth arrive with a shell/code-exec tool.
+## The scenario
 
-The design doc describes a fuller, more "production" shape than this POC runs, for two reasons documented
-here plainly (not mistakes):
+Ledgerline Manufacturing is a mid-size parts maker. Its four-person finance team closes the books every month by matching roughly 500 vendor invoices against purchase orders and delivery records by hand — days of tab-switching and spreadsheet cross-checks. They want the matching automated, but they will not let software post anything to the general ledger on its own: the controller has to review each flagged invoice and approve or reject the posting herself.
 
-1. **MCP transport: stdio, not Streamable HTTP.** The design doc has `erp-mcp` as a separately-deployed
-   service reached over Streamable HTTP (`mcp.servers: [{transport: streamable-http, url: ...}]`). The only
-   MCP pattern with a real, working example in koboi-agent is **stdio** (`mcp_servers/todo_server.py`,
-   `command`/`args`, subprocess) -- there's no proven example of the Streamable-HTTP transport wired up. For
-   this runnable build, `erp_mcp_server.py` runs as a **stdio subprocess co-located in the same container as
-   koboi** (see `backend/Dockerfile` and `config/agent.yaml`'s `mcp.servers` entry:
-   `command: python3`, `args: ["/app/erp_mcp_server.py"]`), instead of a separate `erp-mcp` service/container.
-   **A production deployment would split this into its own HTTP service**, as the design doc intends, once a
-   Streamable-HTTP MCP pattern is proven out in koboi-agent.
-2. **No YAML/entry-point way to preload a custom hook.** `koboi serve config/agent.yaml` (the bare CLI) has
-   no config key for registering a hook -- `koboi.server.app.create_app()` only accepts `extra_hooks=[...]`
-   as a Python kwarg. `src/finance_ext/entrypoint.py` is a small custom entrypoint that calls `create_app()`
-   and runs uvicorn itself; `backend/Dockerfile`'s `CMD` runs `python -m finance_ext.entrypoint` instead of
-   `koboi serve`. Two things worth calling out about it:
-   - `create_app`'s `extra_hooks` param does **not** accept a raw `Hook` subclass instance directly --
-     `AgentPool._build_agent` (koboi/server/pool.py) only handles a plain callable, or a
-     `(callback, events)` tuple, wrapping it in `CallbackHook`. Passing `InvoiceAuditHook()` as-is crashes
-     every request with `TypeError: 'InvoiceAuditHook' object is not subscriptable` -- caught during this
-     build's e2e pass. `entrypoint.py` instead passes `(audit_hook.execute, audit_hook.handles())`.
-   - Because this entrypoint replaces `koboi.server.app.serve_app()` entirely, it also reproduces
-     `serve_app`'s one safety-relevant check by hand: refusing to bind a non-loopback host when
-     `server.auth_required` is true and no API keys are configured, instead of silently serving open. Worth
-     knowing if you copy this pattern elsewhere -- it's easy to drop that guard along with the rest of
-     `serve_app`'s logic.
-   - koboi-agent also has a `koboi.hooks.registry.register_hook(HookEntry(...))` global registry, consulted
-     by the same `build_hook_chain()` that both `koboi serve` and this custom entrypoint end up calling --
-     in principle a consumer module could call it at import time and skip the custom entrypoint entirely.
-     We kept the explicit `entrypoint.py` + `extra_hooks` path instead: it's the mechanism this build's spec
-     called for, and it keeps `InvoiceAuditHook`'s wiring visible in one file rather than as an import-order-
-     dependent side effect of loading `tools.custom`.
+That's the hard constraint the rest of this page is engineered around. Reads should be cheap and shared. The write should be gated, auditable, and never automatic.
 
-Smaller, explicitly-noted simplifications:
+## One number, honestly framed
 
-- **`server.auth_required: false`** in `config/agent.yaml`. Every request in this POC is unauthenticated --
-  fine for a local smoke test, but production would set this `true` and issue tokens via `koboi keys create`
-  (doc 00 Sec.4).
-- **`sandbox.backend: restricted`** is left on (per the design doc, since the job path runs unattended
-  overnight) and booted fine in testing. If it ever blocks boot in your environment, it's safe to drop back
-  to the `passthrough` default for this POC -- it only affects subprocess tools (`run_shell`, `git_*`,
-  filesystem), not the MCP stdio subprocess or the local `post_journal_entry` tool, neither of which declare
-  a `sandbox` dependency.
-- **`agent.mode: act` is set as the config default (fixed post-merge, was a real bug).** koboi's default CHAT
-  mode blocks any tool call whose name isn't in a small hardcoded builtin-tool allowlist
-  (`koboi/hooks/mode_hook.py`'s `_READ_ONLY_TOOLS`: `read`, `search`, `grep`, `find`, `list`, `glob`,
-  `web_search`, `web_fetch`, `calculator`, `delegate_tasks`) -- it has no way to know a custom/MCP tool like
-  `three_way_match` is read-only, so it gets rejected in CHAT mode with `"CHAT mode: tool 'three_way_match' is
-  not allowed"`, same as a real write would be. This build originally only worked because every request
-  happened to pass `"mode":"act"` explicitly -- any caller that omitted it (a real risk, since it's easy to
-  forget) silently degraded instead of erroring. Fixed by setting `agent.mode: act` directly in
-  `config/agent.yaml`, so the app is correct by default regardless of what any individual request sends.
-  Separately, `post_journal_entry`'s `RiskLevel.DESTRUCTIVE` still triggers the approval pause regardless of
-  mode (mode and the approval gate are independent checks in koboi's tool pipeline; only YOLO mode skips
-  approval). A cleaner long-term fix would be a koboi-side way to mark a specific custom/MCP tool as
-  chat-mode-safe; there isn't one today.
-- **Denied/timed-out approvals aren't in the audit log.** koboi resolves DESTRUCTIVE-risk approval *before*
-  `PRE_TOOL_USE` hooks run, so a rejected `post_journal_entry` call returns early and `InvoiceAuditHook`
-  never sees it -- only calls that clear approval (or never needed it) get logged. An auditor asking "what
-  did the controller reject" needs koboi's own approval/trust-DB records for that, not this file. Verified
-  live: the audit log after this build's e2e run has rows for the successful `three_way_match` lookup and
-  the *approved* `post_journal_entry`, and would have skipped an unapproved one entirely.
+External AP-benchmark surveys (Ardent Partners and the like publish one each year) put fully-manual invoice processing somewhere in a band of roughly ten to fifteen dollars per invoice, dropping to a few dollars once a match is touchless. Treat that as a ballpark range drawn from external industry-survey averages — it is not a figure measured for this app or asserted by koboi, and there is no single citation behind it. The load-bearing point for this app is the gap between the two bands, not the exact dollar. At 500 invoices a month, closing that gap is a controller's worth of evenings.
 
-## Layout
+## How teams handle this today — and what they still lack
 
-```
-finance-reconciliation/
-  pyproject.toml           # installable `finance_ext` package (src/ layout)
-  config/agent.yaml        # koboi config: llm, custom tool, mcp server, sandbox, server
-  src/finance_ext/
-    tools.py               # post_journal_entry (local, DESTRUCTIVE)
-    hooks.py                # InvoiceAuditHook (PRE/POST_TOOL_USE -> /data/audit/invoice_audit.jsonl)
-    entrypoint.py            # create_app(cfg, extra_hooks=[...]) + uvicorn.run (see deviation #2)
-  erp_mcp_server.py        # koboi.mcp.server.MCPServer, stdio, mock ERP (see deviation #1)
-  backend/Dockerfile        # koboi-agent[api] + finance_ext + erp_mcp_server.py, one container
-  frontend/                 # controller dashboard: flagged-invoice panel + chat, vanilla JS, no build step
-  docker-compose.yml
+- **ERP-builtin AP modules** (SAP, NetSuite, Oracle) match cleanly inside one system, but they assume the invoice, PO, and receipt all live in *their* database. The moment a vendor, a warehouse, or a freight record sits elsewhere, you're back to spreadsheets.
+- **RPA bots** (UiPath, Automation Anywhere) bridge those gaps by screen-scraping and rule-matching, and they handle volume well — but the guardrails, the approval card, and the audit trail are project plumbing you rebuild on every deploy, and a brittle selector change can silently stop the bot for a week.
+- **A custom Python/LLM script** is fully yours and flexible, but you hand-roll the same stack each time: ERP read access, the human-in-the-loop approval surface, the append-only audit log, the chat UI for the controller's morning review.
+
+Each gets you part of the way. None of them give you, in one codebase, both the cheap shared read path and the protected, approval-gated write path with an audit trail attached.
+
+## The gap
+
+Most finance-automation stacks force a choice: ship a brittle RPA flow that locks you in at the integration layer, or build a custom agent where the approval gate, audit hook, and ERP read client are plumbing you rebuild on every project.
+
+## Enter koboi-agent
+
+[koboi-agent](https://github.com/hedypamungkas/koboi-agent) is an MIT-licensed, async-Python library + self-hostable server for agents you actually leave running. This app is its natural shape for finance: the built-in MCP client consumes Ledgerline's shared ERP read server (one `mcp.servers` entry, no glue code), the built-in approval pause gates the one write (one `risk_level: DESTRUCTIVE` line), and a small custom hook adds the audit trail — all on the same codebase you keep extending when the controller asks for a new rule.
+
+## What you get for free vs. what you build
+
+**What you get for free** (framework, config-only):
+
+| koboi feature | The pain it removes |
+|---|---|
+| `mcp.servers` (stdio client) | koboi connects to the co-located `erp_mcp_server.py` subprocess and consumes `fetch_invoice` / `fetch_purchase_order` / `three_way_match` as `RiskLevel.SAFE`. Ledgerline's ERP reads become a shared MCP server other internal tools can also call — koboi is one more client, not another ERP wrapper. |
+| Approval gate (`RiskLevel.DESTRUCTIVE`) | Marking `post_journal_entry` DESTRUCTIVE is the whole control. koboi emits `pending_approval` and blocks the tool until the controller resolves it over `/v1/sessions/{id}/approve`. No bespoke approval UI to build. |
+| `agent.mode: act` | ModeHook hard-blocks custom/MCP tools in CHAT. Defaulting to `act` means the controller's chat session can call `three_way_match` and `post_journal_entry` without a per-request override — correct by default even when a caller forgets to pin the mode. |
+| `sandbox` (restricted + `git_init` + `rlimits`) | Required for the unattended overnight-job path. Defense-in-depth here — see Caveats — but the gate is what lets a job start at all. |
+| `memory.backend: sqlite` | Session state persists across the controller's turns, so "post *that* entry" resolves to the invoice she just matched. |
+| `server` (chat + CORS) | Interactive SSE chat for the morning review, CORS locked to `localhost:3003` with `X-Session-Id` exposed so the dashboard carries the session across turns. |
+
+**What you build** (the business-specific layer, ~3 small files):
+
+- **`erp_mcp_server.py`** — three read-only ERP lookups over stdio JSON-RPC (mock data; no real ERP behind it). Read-only operations are the textbook MCP fit, so they live on the shared side.
+- **`post_journal_entry`** (`src/finance_ext/tools.py`) — the one write, kept **local** as a `@tool()` on purpose so it can carry `RiskLevel.DESTRUCTIVE`. This is the design pattern: read-only via MCP, the one approvable write via a local `@tool()`.
+- **`InvoiceAuditHook`** (`src/finance_ext/hooks.py`) — logs every `PRE_TOOL_USE` / `POST_TOOL_USE` event (from the local tool *and* the MCP-sourced tools) to `/data/audit/invoice_audit.jsonl`. The trail an auditor asks for later.
+
+## The flow
+
+```mermaid
+flowchart TD
+    U1["Controller turn 1<br/>'3-way match INV-8842 vs PO-4471'"] --> S1["POST /v1/chat/stream  mode: act"]
+    U2["Controller turn 2<br/>'post that entry to GL 5000'"] --> S2["POST /v1/chat/stream  mode: act"]
+
+    S1 --> MCP["MCP stdio subprocess<br/>erp_mcp_server.py"]
+    MCP --> R1["fetch_invoice / fetch_purchase_order / three_way_match<br/>SAFE -> auto-run, no approval"]
+    R1 --> H1["InvoiceAuditHook PRE+POST<br/>-> /data/audit/invoice_audit.jsonl"]
+    H1 --> O1["reply: matched: invoice reconciles..."]
+
+    S2 --> T["post_journal_entry<br/>local @tool, DESTRUCTIVE"]
+    T --> AP{"approval gate fires<br/>BEFORE PRE_TOOL_USE hooks"}
+    AP -->|pending_approval SSE| CARD["controller clicks Approve<br/>POST /v1/sessions/&#123;id&#125;/approve"]
+    CARD --> RUN["post_journal_entry runs"]
+    RUN --> H2["InvoiceAuditHook PRE+POST -> audit log"]
+    H2 --> O2["reply: Posted 4200 to 5000... (mock)"]
+    AP -->|Deny / timeout| SKIP["returns early — NOT in audit log<br/>see Caveats"]
 ```
 
-## Running it
+Two turns, two risk paths. The read turn never pauses. The write turn pauses at the approval gate, and the audit hook only fires once that gate clears — which is also the catch (see Caveats).
+
+## Run it
+
+Fastest path — the quickstart wizard checks Docker, writes the `.env` (asks for your OpenAI/gateway key), builds, starts, and prints the URLs:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/hedypamungkas/koboi-projects/main/quickstart.sh | bash
+# or, from a checkout:
+bash quickstart.sh --project finance-reconciliation
+```
+
+Manual path:
 
 ```bash
 cd finance-reconciliation
+cp .env.example .env          # fill in OPENAI_API_KEY (+ OPENAI_MODEL / OPENAI_BASE_URL if needed)
 docker compose build
 docker compose up -d
 ```
 
-Copy `.env.example` to `.env` in this directory and fill in your own `OPENAI_API_KEY` (and
-`OPENAI_MODEL`/`OPENAI_BASE_URL` if needed). `docker-compose.yml` reads it via `env_file: [.env]`.
-`.env` is gitignored -- never commit real credentials.
-
-- Backend: `http://localhost:8003` (koboi's port 8000 published)
-- Frontend: `http://localhost:3003` (controller dashboard)
+- Backend: `http://localhost:8003` (koboi's 8000, published as 8003)
+- Frontend (controller dashboard): `http://localhost:3003`
 
 ### Smoke test
 
@@ -125,55 +104,53 @@ Copy `.env.example` to `.env` in this directory and fill in your own `OPENAI_API
 curl -sf http://localhost:8003/healthz
 curl -sf http://localhost:8003/readyz
 
-# First turn: read-only three-way match via the MCP subprocess. mode:"act" is required --
-# see "Every request pins mode: act" above.
+# Turn 1: read-only three-way match over the MCP stdio subprocess (SAFE, auto-run).
 curl -s -N -X POST http://localhost:8003/v1/chat/stream -H "Content-Type: application/json" \
   -d '{"message": "Run a three-way match on invoice INV-8842 against PO PO-4471", "mode": "act"}'
-# Capture the X-Session-Id response header, then:
-
-curl -s -N -X POST http://localhost:8003/v1/chat/stream -H "Content-Type: application/json" \
-  -H "X-Session-Id: <id-from-above>" \
-  -d '{"message": "post that entry to GL account 5000", "mode": "act"}'
-
-docker compose down
 ```
 
-Expect the first call to show a `tool_call` / `tool_result` pair for `three_way_match` (proving the MCP
-stdio subprocess started and answered), then `complete`. Expect the second call to produce a
-`pending_approval` event for `post_journal_entry` (proving its `RiskLevel.DESTRUCTIVE` triggers koboi's
-approval pause) -- approving/rejecting it isn't required for the smoke test, but if you want to see the full
-loop close, grab `approval_id` from that event and:
+Expect a `tool_call` / `tool_result` pair for `three_way_match` (proving the MCP subprocess started and answered), then `complete`. Capture the `X-Session-Id` response header for the second turn:
 
 ```bash
-curl -s -X POST http://localhost:8003/v1/sessions/<session-id>/approve -H "Content-Type: application/json" \
+SID=<session-id-from-the-header-above>
+
+# Turn 2: the write. DESTRUCTIVE -> pending_approval.
+curl -s -N -X POST http://localhost:8003/v1/chat/stream -H "Content-Type: application/json" \
+  -H "X-Session-Id: $SID" \
+  -d '{"message": "post that entry to GL account 5000", "mode": "act"}'
+```
+
+Expect a `pending_approval` event carrying an `approval_id`. To close the loop, resolve it (the second `curl -N` above stays open and unblocks when you do):
+
+```bash
+curl -s -X POST http://localhost:8003/v1/sessions/$SID/approve -H "Content-Type: application/json" \
   -d '{"approval_id": "<approval-id-from-event>", "decision": "approve", "scope": "once"}'
 ```
 
-which unblocks the still-open second `curl -N` call and lets it finish with a `tool_result` of
-`"Posted 4200 to 5000 for invoice INV-8842 (mock -- no real ERP)."` -- verified live during this build.
+The still-open second stream then finishes with a `tool_result` confirming the mock post to GL 5000 (the mock `post_journal_entry` reports it posted the matched amount to the requested GL account; no real ERP is touched).
 
-Tail the audit trail from the host via the named volume:
+Tail the audit trail (every tool call that runs, both paths):
 
 ```bash
 docker compose exec koboi cat /data/audit/invoice_audit.jsonl
+docker compose down
 ```
 
 If the MCP subprocess fails to start or the entrypoint errors, check `docker compose logs koboi`.
 
 ## Frontend
 
-Plain HTML + vanilla JS (`frontend/index.html`, `frontend/app.js`), no build step. Left panel is a static
-mock list of flagged invoices (mirroring `erp_mcp_server.py`'s sample data); clicking one pre-fills a
-three-way-match question in the chat box. The chat box is wired to a `streamChat()` helper matching doc 00
-Sec.3, extended to track `X-Session-Id` across turns and always send `mode: "act"` (see deviations above).
-When a `pending_approval` SSE event arrives, an inline approve/reject card renders and posts to
-`POST /v1/sessions/{id}/approve` with `{approval_id, decision, scope}` (the real `ApproveRequest` schema --
-note this is a couple of fields richer than doc 00's illustrative `{approved: true}` snippet).
+Plain HTML + vanilla JS, no build step. The left panel is a static mock list of flagged invoices (mirroring `erp_mcp_server.py`'s sample data); clicking one pre-fills a three-way-match question. The chat column runs a `streamChat()` helper that carries `X-Session-Id` across turns and always sends `mode: "act"`. When a `pending_approval` SSE event arrives, an inline approve/reject card renders and posts to `POST /v1/sessions/{id}/approve` with `{approval_id, decision, scope}` — the real `ApproveRequest` schema. Because the frontend (`localhost:3003`) and backend (`localhost:8003`) are different origins, `config/agent.yaml` sets `server.cors.allow_origins: ["http://localhost:3003"]` + `expose_headers: ["X-Session-Id"]` — without the latter, the browser hides that header from JS and session continuity silently breaks even though curl works fine.
 
-Because the frontend (`localhost:3003`) and backend (`localhost:8003`) are different origins, browser
-`fetch()` calls need CORS -- koboi only adds `CORSMiddleware` when `server.cors` is explicitly set in YAML
-(no `cors:` block means no cross-origin reads at all, by design). `config/agent.yaml` sets
-`server.cors.allow_origins: ["http://localhost:3003"]` and `expose_headers: ["X-Session-Id"]` (without the
-latter, the browser's fetch API silently hides that response header from JS, breaking session continuity
-across chat turns even though curl works fine). Verified with `curl -i -X OPTIONS ... -H "Origin:
-http://localhost:3003"` during this build.
+## Caveats / what's real vs. demo
+
+This is a local smoke-test POC. The boundaries below are the ones a real deploy has to know about — several of them are properties of koboi 0.18.2 itself, not just this demo.
+
+- **MCP transport is STDIO, not Streamable-HTTP as `docs/03` sketched.** Only stdio has a proven shipped example in koboi-agent; there's no proven Streamable-HTTP pattern to build against. So `erp_mcp_server.py` runs as a stdio subprocess co-located in the same container as koboi (`config/agent.yaml` → `mcp.servers: [{command: python3, args: [/app/erp_mcp_server.py]}]`). Production would split the ERP MCP into its own HTTP service once a Streamable-HTTP pattern is proven.
+- **`erp_mcp_server.py` is a mock; there's no real ERP behind it.** A handful of sample invoices / POs are hardcoded in-memory, including a deliberate mismatch so you can see the flagging path.
+- **No YAML way to preload hooks.** `koboi serve` has no config key for registering a hook — `create_app()` only accepts `extra_hooks=[...]` as a Python kwarg. `src/finance_ext/entrypoint.py` replaces `serve_app` and runs uvicorn itself (it's the container's `CMD`), and it reproduces `serve_app`'s loopback-auth guard by hand (refusing to bind a non-loopback host when `auth_required: true` with no API keys). That guard is easy to drop when copying this pattern — don't.
+- **Passing `InvoiceAuditHook()` as-is to `extra_hooks` crashes with `TypeError`.** `AgentPool._build_agent` (`koboi/server/pool.py`) only accepts a plain callable or a `(callback, events)` tuple, wrapping it in `CallbackHook`. The entrypoint passes `(audit_hook.execute, audit_hook.handles())` instead. Verified live — the bare-instance form fails every request with `TypeError`.
+- **DENIED / timed-out approvals are NOT in the audit log.** koboi resolves DESTRUCTIVE-risk approval *before* `PRE_TOOL_USE` hooks run (risk/approval is step 3, the audit hook is step 4 — see `koboi/loop_pipeline.py`). A rejected `post_journal_entry` returns early and `InvoiceAuditHook` never sees it. Verified live: after the e2e run the audit log has the `three_way_match` lookup and the *approved* `post_journal_entry`, and would have skipped an unapproved one entirely. An auditor asking "what did the controller reject" needs koboi's own approval/trust-DB records, not this file.
+- **`server.auth_required: false` is local-only.** Every request in this POC is unauthenticated. Production sets `true` and mints tokens via `koboi keys create` (`docs/00` §4).
+- **`sandbox.rlimits` + `git_init` are DEFENSE-IN-DEPTH only here.** `post_journal_entry` runs in-process and the ERP MCP server is a persistent, non-sandboxed stdio child — so `git_init` / `rlimits` are inert for the actual tools in this app. They're left on because the unattended job path requires `sandbox.backend: restricted` to start, and real teeth arrive the moment you add a shell or code-exec tool.
+- **`agent.mode: act` is required by default.** koboi's ModeHook hard-blocks custom/MCP tools in CHAT (and has no way to know a custom/MCP tool like `three_way_match` is read-only). Setting `agent.mode: act` in `config/agent.yaml` means the controller's chat session can call `three_way_match` and `post_journal_entry` without a per-request mode override — correct by default even when a caller forgets to pin the mode. `post_journal_entry`'s DESTRUCTIVE approval pause is independent of mode and fires either way (only YOLO skips approval).
