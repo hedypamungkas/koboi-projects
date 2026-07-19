@@ -17,18 +17,17 @@ or Docker Engine + the compose plugin on Linux).
 **macOS / Linux** (run from anywhere):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/<owner>/<repo>/main/quickstart.sh | bash
+curl -fsSL https://raw.githubusercontent.com/hedypamungkas/koboi-projects/main/quickstart.sh | bash
 ```
 
 **Windows** (PowerShell — the launcher finds WSL2 or Git Bash for you):
 
 ```powershell
-irm https://raw.githubusercontent.com/<owner>/<repo>/main/quickstart.ps1 | iex
+irm https://raw.githubusercontent.com/hedypamungkas/koboi-projects/main/quickstart.ps1 | iex
 ```
 
-> Replace `<owner>/<repo>` with this repo's path once published. Until then, run the local copy:
-> `bash quickstart.sh` (macOS/Linux/Git Bash/WSL) or
-> `powershell -ExecutionPolicy Bypass -File quickstart.ps1` (Windows).
+> Not published yet? Run the local copy from a checkout: `bash quickstart.sh`
+> (macOS/Linux/Git Bash/WSL) or `powershell -ExecutionPolicy Bypass -File quickstart.ps1` (Windows).
 
 The wizard picks a use case, shows live build/startup progress, waits for the health check, and prints the
 Web UI + API URLs. It also runs headlessly for automation:
