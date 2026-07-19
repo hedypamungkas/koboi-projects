@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import time
 
@@ -155,16 +156,17 @@ async def screen_fraud(claim_id: str) -> str:
         return err
 
     indicators: list[str] = []
-    rw = claim.get("reported_within", "")
+    # `or ""` (not just a .get default) so a present-but-None value can't make
+    # `"day" in None` / `"".lower()` raise -- robust to data changes.
+    rw = claim.get("reported_within") or ""
     if "day" in rw:  # "19 days" etc. -- reported well after the loss
         indicators.append("late reporting (>72h)")
     if claim.get("prior_damage"):
         indicators.append("pre-existing damage noted")
     # Single-vehicle / hit-while-parked losses with no independent witness are routinely
     # flagged for review -- represent that without inventing facts about the policyholder.
-    if "no third party" in claim.get("loss_type", "").lower() or "single-vehicle" in claim.get(
-        "loss_type", ""
-    ).lower():
+    loss_type = (claim.get("loss_type") or "").lower()
+    if "no third party" in loss_type or "single-vehicle" in loss_type:
         indicators.append("no independent witness / third party")
 
     if len(indicators) >= 2:
@@ -199,9 +201,21 @@ async def screen_fraud(claim_id: str) -> str:
     risk_level=RiskLevel.SAFE,
 )
 async def record_recommendation(claim_id: str, amount: float, rationale: str) -> str:
-    # NOTE: a rationale containing "total loss" is deny-gated by policy.rules in agent.yaml,
-    # so this body only runs for routine recommendations -- which is exactly the intent.
-    os.makedirs(os.path.dirname(RECOMMENDATIONS_PATH), exist_ok=True)
+    # Defense-in-depth for the policy.rules "*total loss*" deny: that glob is
+    # case-sensitive in koboi 0.18.x, so "Total Loss"/"TOTAL LOSS" would bypass
+    # it. A total-loss claim must never get an auto-recommendation, so enforce
+    # it here too, case-insensitively (P1 bug D).
+    if "total loss" in (rationale or "").lower():
+        return (
+            "Cannot auto-recommend on a total-loss claim -- route to a human "
+            "adjuster via transfer_to_human. (rationale indicates total loss.)"
+        )
+    # Validate amount: NaN/Inf would make json.dumps emit invalid JSON
+    # (NaN/Infinity tokens) that breaks the adjuster dashboard's strict parser.
+    if (not isinstance(amount, (int, float))) or isinstance(amount, bool) \
+            or not math.isfinite(amount) or amount < 0:
+        return f"Error: amount must be a finite non-negative number (USD), got {amount!r}."
+    os.makedirs(os.path.dirname(RECOMMENDATIONS_PATH) or ".", exist_ok=True)
     row = {
         "ts": time.time(),
         "claim_id": claim_id,

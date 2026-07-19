@@ -9,7 +9,9 @@ candidate itself (see docs/02-hr-recruiting-screening.md).
 from __future__ import annotations
 
 import json
+import math
 import os
+import threading
 import time
 
 from koboi.tools.registry import tool
@@ -18,6 +20,11 @@ from koboi.types import RiskLevel
 # Where score_candidate persists its advisory recommendations. Mounted as a
 # Docker volume (/data) so results survive container restarts.
 REVIEW_QUEUE_PATH = os.environ.get("HR_REVIEW_QUEUE_PATH", "/data/review_queue.json")
+# Serializes concurrent score_candidate writes across pooled jobs
+# (jobs.max_concurrent > 1) so the read-modify-write can't lose updates or
+# leave a half-written file -- the proven data-loss cascade (bug #3).
+_QUEUE_LOCK = threading.Lock()
+_VALID_RECS = ("strong_match", "possible_match", "weak_match")
 
 # Sample resumes standing in for a real ATS lookup.
 _RESUMES: dict[str, dict[str, str]] = {
@@ -96,6 +103,13 @@ async def fetch_resume(resume_id: str) -> str:
     risk_level=RiskLevel.MODERATE,
 )
 async def score_candidate(resume_id: str, score: float, rationale: str, recommendation: str) -> str:
+    # Validate inputs (the JSON schema declares these, but enforce here too so a
+    # direct/bad call can't persist garbage). score is documented as 0-100.
+    if not isinstance(score, (int, float)) or isinstance(score, bool) or not math.isfinite(score) or not (0 <= score <= 100):
+        return f"Error: score must be a finite number in [0, 100], got {score!r}."
+    if recommendation not in _VALID_RECS:
+        return f"Error: recommendation must be one of {_VALID_RECS}, got {recommendation!r}."
+
     entry = {
         "resume_id": resume_id,
         "name": _RESUMES.get(resume_id, {}).get("name", "unknown"),
@@ -105,16 +119,30 @@ async def score_candidate(resume_id: str, score: float, rationale: str, recommen
         "scored_at": time.time(),
     }
 
-    os.makedirs(os.path.dirname(REVIEW_QUEUE_PATH), exist_ok=True)
-    queue: list[dict] = []
-    if os.path.exists(REVIEW_QUEUE_PATH):
-        try:
-            with open(REVIEW_QUEUE_PATH) as f:
-                queue = json.load(f)
-        except (json.JSONDecodeError, OSError):
-            queue = []
-    queue.append(entry)
-    with open(REVIEW_QUEUE_PATH, "w") as f:
-        json.dump(queue, f, indent=2)
+    os.makedirs(os.path.dirname(REVIEW_QUEUE_PATH) or ".", exist_ok=True)
+    # Atomic + locked persistence: temp-write then os.replace so a crash can't
+    # leave a truncated file, and the lock prevents lost updates under
+    # max_concurrent > 1. On a corrupt read we quarantine the file instead of
+    # silently wiping the queue (the old `queue = []` reset) -- bug #3.
+    with _QUEUE_LOCK:
+        queue: list[dict] = []
+        if os.path.exists(REVIEW_QUEUE_PATH):
+            try:
+                with open(REVIEW_QUEUE_PATH) as f:
+                    data = json.load(f)
+                if isinstance(data, list):
+                    queue = data
+            except (json.JSONDecodeError, OSError):
+                corrupt = f"{REVIEW_QUEUE_PATH}.corrupt.{int(time.time())}"
+                try:
+                    os.replace(REVIEW_QUEUE_PATH, corrupt)
+                except OSError:
+                    pass
+                queue = []
+        queue.append(entry)
+        tmp = f"{REVIEW_QUEUE_PATH}.tmp"
+        with open(tmp, "w") as f:
+            json.dump(queue, f, indent=2)
+        os.replace(tmp, REVIEW_QUEUE_PATH)
 
     return f"Recorded score={score} for {resume_id} (recommendation={recommendation})"

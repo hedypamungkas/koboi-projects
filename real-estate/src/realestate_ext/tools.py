@@ -10,6 +10,11 @@ the CRM's own tools, never through koboi.
 
 from __future__ import annotations
 
+import json
+import os
+import threading
+import time
+
 from koboi.tools.registry import tool
 from koboi.types import RiskLevel
 
@@ -105,10 +110,25 @@ _LEADS: dict[str, dict] = {
     },
 }
 
-# In-memory "pending review" queues -- stand in for the CRM's draft field /
+# Durable "pending review" queue -- stands in for the CRM's draft field /
 # pending-send queue. Never flipped to published/sent by this code.
-_LISTING_DRAFTS: dict[str, str] = {}
-_EMAIL_DRAFTS: dict[str, str] = {}
+#
+# Was two module-level mutable dicts; under jobs.max_concurrent + delegate_tasks
+# that meant (a) drafts lost on container restart despite the "saved to the CRM"
+# message, (b) last-write-wins loss / cross-session leak across pooled jobs, and
+# (c) the dicts were never read back anyway. A locked JSONL append is durable,
+# concurrency-safe, and one-record-per-line (json.dumps escapes newlines) -- P1 bug F.
+DRAFTS_LOG_PATH = os.environ.get("RE_DRAFTS_LOG", "/data/realestate_drafts.jsonl")
+_DRAFT_LOCK = threading.Lock()
+
+
+def _save_draft(kind: str, key: str, draft: str) -> None:
+    """Append one draft record to the durable review queue."""
+    os.makedirs(os.path.dirname(DRAFTS_LOG_PATH) or ".", exist_ok=True)
+    record = {"kind": kind, "key": key, "draft": draft, "saved_at": time.time()}
+    line = json.dumps(record, ensure_ascii=False)
+    with _DRAFT_LOCK, open(DRAFTS_LOG_PATH, "a", encoding="utf-8") as f:
+        f.write(line + "\n")
 
 
 @tool(
@@ -160,7 +180,7 @@ async def draft_listing_description(property_id: str) -> str:
         f"This {prop['sqft']}-sqft home offers:\n{feature_bullets}\n\n"
         f"{price_label} {price_value}. Schedule a tour today!"
     )
-    _LISTING_DRAFTS[property_id] = draft
+    _save_draft("listing", property_id, draft)
     return (
         f"Draft listing description for {property_id} saved to the CRM's draft field "
         f"(not published -- awaiting human review):\n\n{draft}"
@@ -193,7 +213,7 @@ async def draft_followup_email(lead_id: str) -> str:
         "Happy to answer any questions or set up another showing whenever works for you.\n\n"
         "Best,\nHarbor Realty Group"
     )
-    _EMAIL_DRAFTS[lead_id] = draft
+    _save_draft("email", lead_id, draft)
     return (
         f"Draft follow-up email for lead {lead_id} ({lead['name']}) saved to the CRM's "
         f"pending-send queue (not sent -- awaiting human review):\n\n{draft}"

@@ -119,10 +119,14 @@ async def score_churn_risk(account_id: str) -> str:
         score += 8
         factors.append("flat product usage")
     trend = h["active_users_trend"]
+    # trend_pct preserves the sign ("-18%" -> -18), so for a declining trend the
+    # magnitude is -trend_pct. The previous `trend_pct >= 10` was unreachable for
+    # ANY "-" trend (startswtith("-") => trend_pct <= 0, never >= 10), making the
+    # +20 "major decline" branch dead code -- P1 bug C.
     trend_pct = int(trend.rstrip("%+-")) if trend.lstrip("+-").rstrip("%").isdigit() else 0
-    if trend.startswith("-") and trend_pct >= 10:
+    if trend.startswith("-") and (-trend_pct) >= 10:
         score += 20
-        factors.append(f"active users down {trend})")
+        factors.append(f"active users down {trend}")
     elif trend.startswith("-"):
         score += 6
     if h["open_support_tickets"] >= 5:
@@ -200,7 +204,11 @@ async def flag_at_risk(account_id: str, reason: str) -> str:
     acc, err = _account_or_error(account_id)
     if err:
         return err
-    os.makedirs(os.path.dirname(AT_RISK_LOG), exist_ok=True)
+    # Collapse whitespace so an LLM-controlled reason with embedded newlines can't
+    # forge extra lines in the CSM's at-risk log (same log-injection class as
+    # healthcare's flag_urgent_escalation).
+    safe_reason = " ".join(str(reason).split())[:500]
+    os.makedirs(os.path.dirname(AT_RISK_LOG) or ".", exist_ok=True)
     with open(AT_RISK_LOG, "a", encoding="utf-8") as f:
-        f.write(f"{account_id} ({acc['name']}) | csm={acc['csm']} | {reason}\n")
+        f.write(f"{account_id} ({acc['name']}) | csm={acc['csm']} | {safe_reason}\n")
     return f"Flagged {acc['name']} ({account_id}) at-risk for {acc['csm']} with a warm hand-off summary."
