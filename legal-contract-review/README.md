@@ -93,7 +93,7 @@ Or build by hand:
 cd legal-contract-review
 cp .env.example .env   # fill in OPENAI_API_KEY (+ OPENAI_MODEL / OPENAI_BASE_URL if needed)
 docker compose build
-docker compose up -d
+docker compose up -d --wait    # waits for the compose healthcheck (/healthz)
 curl -sf http://localhost:8005/healthz
 curl -sf http://localhost:8005/readyz
 ```

@@ -71,7 +71,7 @@ Other commands: `--list` (projects + ports), `--status` (what's running + health
 ```sh
 cd ecommerce-support          # any of the ten
 docker compose build
-docker compose up -d
+docker compose up -d --wait    # waits for the compose healthcheck (/healthz)
 docker compose ps             # both services healthy
 curl -s http://localhost:8001/healthz    # {"status":"ok"}
 # open http://localhost:3001 and chat; see that project's README for the smoke-test curl
@@ -170,7 +170,7 @@ A structural split worth knowing: **only 8 is orchestrated** (`deep_research` in
 
 ## What's real vs. demo
 
-**Real (verified end-to-end against a live LLM):** `koboi-agent==0.18.2` from PyPI with no fork; real LLM calls via your gateway; real approval gates (`pending_approval` SSE → `POST /v1/sessions/{id}/approve`); real `policy.rules` hard-deny; real HMAC-signed webhooks; real A2A HTTP between containers; real RAG retrieval over the seed docs; real sqlite memory and proactive recall. The first six apps (1-6) were verified earlier; **apps 7-10 were verified end-to-end on 2026-07-18** on a shared gateway.
+**Real (verified end-to-end against a live LLM):** `koboi-agent==0.18.2` from PyPI with no fork; real LLM calls via your gateway; real approval gates (`pending_approval` SSE → `POST /v1/sessions/{id}/approve`); real `policy.rules` hard-deny; real HMAC-signed webhooks; real A2A HTTP between containers; real RAG retrieval over the seed docs; real sqlite memory and proactive recall. **All ten apps were re-verified end-to-end on 2026-07-20** — 120+ automated Layer-1 tests, 10/10 healthy non-root boots, and live-LLM scenarios for every use case against a shared gateway (apps 7-10 originally verified 2026-07-18).
 
 **Demo / fictional (by design):** every business is fictional (Anvil & Co, Northstar Talent, Beacon Mutual, Riverside Family Clinic, etc.) with scripted seed data; the finance ERP MCP server returns canned lookups; market-intel's web search defaults to `mock` (set `WEB_SEARCH_PROVIDER=brave|firecrawl` + a key for live research); customer-success media is `mock`; employee-concierge tickets write to a local JSONL file (no real ServiceNow); webhooks POST to a URL you point at a receiver. All ten configs ship with `server.auth_required: false` for local POCs (UC9's concierge is the single exception — A2A forces it on).
 
@@ -185,7 +185,7 @@ A structural split worth knowing: **only 8 is orchestrated** (`deep_research` in
 - **Single-node hot state** — pools, jobs, idempotency, and the step journal are in-process; not multi-node HA. RAG is in-process (filesystem/HTTP/S3 sources only). MCP auth is static-Bearer or OAuth2 client-credentials; only the stdio transport has a proven shipped example.
 - **`docs/00` is partly stale** relative to the 10-app set — it still says "all six apps" and "none wire up a webhook"; UC7/8/9/10 do wire `jobs.webhooks`.
 
-For the full layered reproduction runbook (mock/unit config+compile pass → integration boot pass → real-LLM end-to-end, with exact `curl` smoke tests and browser walkthroughs), see [`TEST.md`](TEST.md).
+For the full layered reproduction runbook — **automated Layer-1 pytest** (`tests/`, <2s, no Docker/LLM) → integration boot pass → real-LLM end-to-end, with exact `curl` smoke tests and browser walkthroughs — see [`TEST.md`](TEST.md).
 
 ## Status
 

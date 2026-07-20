@@ -8,7 +8,7 @@ A buyer chat that answers property questions on the listings site all day, and t
 
 It runs two very different jobs out of one koboi-agent config. By day, a buyer widget on the listings site calls `lookup_property` to answer price, availability, and amenity questions — and politely declines if a buyer asks it to draft copy. By night, an unattended batch drafts descriptions for new listings and follow-up emails for stale leads, fanning the work out in parallel via the built-in `delegate_tasks` tool.
 
-It does not publish a listing, send an email, or push anything to the CRM. Drafts land in an in-memory store standing in for Harbor's CRM, and a human picks them up from there.
+It does not publish a listing, send an email, or push anything to the CRM. Drafts land in a durable append-only log (`/data/realestate_drafts.jsonl`) standing in for Harbor's CRM, and a human picks them up from there.
 
 ## The scenario
 
@@ -48,7 +48,7 @@ Listing software holds the data and routes leads cleanly but reasons shallowly a
 Three custom tools in `src/realestate_ext/tools.py` (loaded via `tools.custom: [{module: realestate_ext.tools}]`):
 
 - `lookup_property` — **SAFE**. Reads price, availability, beds/baths, sqft, and features for a property by ID. The only tool a buyer chat is ever allowed to call.
-- `draft_listing_description` — **MODERATE**. Turns a property's raw feature list into marketing copy and writes the draft to the in-memory store. Never publishes.
+- `draft_listing_description` — **MODERATE**. Turns a property's raw feature list into marketing copy and appends the draft to `/data/realestate_drafts.jsonl`. Never publishes.
 - `draft_followup_email` — **MODERATE**. Drafts a check-in email for a stale lead using that lead's history. Never sends.
 
 The system prompt in `config/agent.yaml` hard-separates the two callers. **BUYER CHAT** may only call `lookup_property` — a draft tool call there has no human approver watching, so it would stall and then be auto-denied; if a buyer asks for a fresh description or a rewrite, the model explains drafts are handled by the team and offers to answer property questions instead. **NIGHTLY JOB** is the only context where the draft tools may be called, and for any batch of 2+ items the model must fan out via `delegate_tasks` — one sub-task per property/lead, each naming the exact tool and ID ("Call `draft_listing_description` with `property_id=P-101`"). `delegate_tasks` accepts at most 10 items per call, so a larger batch splits into multiple calls.
@@ -68,7 +68,7 @@ flowchart TD
   H --> I2["sub-agent: draft_listing_description<br/>property_id=P-102"]
   H --> I3["sub-agent: draft_listing_description<br/>property_id=P-103"]
   H --> I4["sub-agent: draft_followup_email<br/>lead_id=L-002"]
-  I1 --> J["drafts land in in-memory store<br/>(stand-in for Harbor CRM)"]
+  I1 --> J["drafts append to /data/realestate_drafts.jsonl<br/>(stand-in for Harbor CRM)"]
   I2 --> J
   I3 --> J
   I4 --> J
@@ -93,8 +93,7 @@ bash quickstart.sh --project real-estate
 cd real-estate
 cp .env.example .env          # fill OPENAI_API_KEY (and OPENAI_MODEL / OPENAI_BASE_URL if needed)
 docker compose build
-docker compose up -d
-sleep 3
+docker compose up -d --wait    # waits for the compose healthcheck (/healthz)
 curl -sf http://localhost:8006/healthz
 curl -sf http://localhost:8006/readyz
 ```
@@ -130,7 +129,7 @@ docker compose down
 
 ## Caveats / what's real vs demo
 
-- **No real CRM.** All three tools read/write a small in-memory dict standing in for Harbor's Yardi/AppFolio-style system. `draft_listing_description` and `draft_followup_email` only ever *write a draft* — nothing is published or sent — which is why they stay `MODERATE`, not `DESTRUCTIVE` (jobs run unattended with no approval step, so nothing a job does can require one).
+- **No real CRM.** Listings/leads are a small in-code dict standing in for Harbor's Yardi/AppFolio-style system; `draft_listing_description` and `draft_followup_email` append each draft to `/data/realestate_drafts.jsonl` (a durable append-only log, locked against concurrent nightly-batch writes). They only ever *write a draft* — nothing is published or sent — which is why they stay `MODERATE`, not `DESTRUCTIVE` (jobs run unattended with no approval step, so nothing a job does can require one).
 - **`auth_required: false` and `cors.allow_origins: ["*"]` are POC-only.** Production flips auth to `true` (mint keys via `koboi keys create`) and locks CORS to the listings-site origin.
 - **The dashboard's "Run nightly batch now" button is a demo convenience.** Production triggers `POST /v1/jobs` from an external cron (any scheduler Harbor already runs). A real cron already knew the exact property/lead IDs — it just queried the CRM for them — so it would name them explicitly in the job message instead of relying on the system-prompt fallback below.
 - **The e2e test message ("the 3 new properties… stale lead L-002") doesn't name IDs.** Without a hint the model guessed plausible-but-nonexistent IDs (`P-001`/`P-002`/`P-003`) and the batch partially failed. The system prompt in `config/agent.yaml` now tells the agent tonight's batch IDs (`P-101`, `P-102`, `P-103` are the new listings; `L-002` is the stale lead) as a fallback when a caller doesn't name them. A real cron-triggered job wouldn't need this — see above.

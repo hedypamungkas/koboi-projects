@@ -92,7 +92,7 @@ Manual path:
 cd finance-reconciliation
 cp .env.example .env          # fill in OPENAI_API_KEY (+ OPENAI_MODEL / OPENAI_BASE_URL if needed)
 docker compose build
-docker compose up -d
+docker compose up -d --wait    # waits for the compose healthcheck (/healthz)
 ```
 
 - Backend: `http://localhost:8003` (koboi's 8000, published as 8003)

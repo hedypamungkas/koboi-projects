@@ -90,7 +90,7 @@ Or build by hand:
 cd market-intel
 cp .env.example .env   # fill in OPENAI_*; optionally WEB_SEARCH_PROVIDER=firecrawl + FIRECRAWL_API_KEY
 docker compose build
-docker compose up -d
+docker compose up -d --wait    # waits for the compose healthcheck (/healthz)
 ```
 
 - Backend: `http://localhost:8008` · Frontend: `http://localhost:3008`
