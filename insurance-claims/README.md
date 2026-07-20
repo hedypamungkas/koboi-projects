@@ -99,7 +99,7 @@ OPENAI_API_KEY=sk-... bash quickstart.sh --project insurance-claims --yes
 cd insurance-claims
 cp .env.example .env          # fill in OPENAI_* + EMBEDDING_*  (CRITIC_MODEL defaults to claude-sonnet-5)
 docker compose build
-docker compose up -d
+docker compose up -d --wait    # waits for the compose healthcheck (/healthz)
 ```
 
 Backend: `http://localhost:8007` -- Adjuster console: `http://localhost:3007`

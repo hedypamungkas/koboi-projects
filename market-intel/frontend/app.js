@@ -90,7 +90,12 @@ function addThinking() {
   return item;
 }
 
-const STREAM_TIMEOUT_MS = 240_000;
+// Must be >= llm.timeout (300s in config/agent.yaml) + headroom: a live-chat
+// deep_research can legitimately run several minutes, and the previous 240s
+// value cut the client off while the backend was still working (timeout
+// inversion). For long weekly briefs, prefer the async "Dispatch weekly brief"
+// button (POST /v1/jobs), which uses jobs.timeout_seconds (1800s).
+const STREAM_TIMEOUT_MS = 330_000;
 
 async function streamChat(message, onEvent) {
   const headers = { "Content-Type": "application/json" };

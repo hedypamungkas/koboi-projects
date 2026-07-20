@@ -18,6 +18,7 @@ import json
 import os
 import sys
 import time
+import uuid
 from pathlib import Path
 
 TICKETS_PATH = Path(os.environ.get("CONCIERGE_TICKETS_LOG", "/data/tickets.jsonl"))
@@ -30,8 +31,9 @@ def main() -> int:
     except json.JSONDecodeError:
         ctx = {"raw": raw}
 
-    # Synthesize a stable ticket id from the session + event + timestamp.
-    basis = f"{ctx.get('session_id','')}|{ctx.get('event','')}|{int(time.time())}"
+    # Synthesize a unique ticket id. Was session+event+second-resolution time,
+    # which collided on a same-second retry/flake; uuid makes it unique.
+    basis = f"{ctx.get('session_id','')}|{ctx.get('event','')}|{uuid.uuid4().hex}"
     ticket_id = "INC-" + hashlib.sha1(basis.encode()).hexdigest()[:8].upper()
 
     row = {

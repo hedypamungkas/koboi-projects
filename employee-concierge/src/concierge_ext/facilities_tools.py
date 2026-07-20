@@ -6,6 +6,7 @@ All SAFE so they execute through the A2A peer_invoke path without an approval ro
 from __future__ import annotations
 
 import json
+import secrets
 import time
 
 from koboi.tools.registry import tool
@@ -49,7 +50,7 @@ async def lookup_desk(employee_id: str) -> str:
     risk_level=RiskLevel.SAFE,
 )
 async def book_desk_move(employee_id: str, target_floor: str, target_desk: str) -> str:
-    ref = f"MV-{int(time.time()) % 100000}"
+    ref = f"MV-{secrets.token_hex(3)}"
     return f"Desk move {ref} booked for {employee_id} -> floor {target_floor}, desk {target_desk}. Scheduled for the next facilities window. (mock -- no real move.)"
 
 
@@ -67,5 +68,5 @@ async def book_desk_move(employee_id: str, target_floor: str, target_desk: str) 
     risk_level=RiskLevel.SAFE,
 )
 async def report_maintenance(location: str, issue: str) -> str:
-    ref = f"MNT-{int(time.time()) % 100000}"
+    ref = f"MNT-{secrets.token_hex(3)}"
     return f"Maintenance ticket {ref} logged for {location}: {issue}. Routed to the building ops team. (mock -- no real ticket system.)"

@@ -129,6 +129,15 @@ handover:
 
 sandbox:
   backend: restricted   # the weekly account-review job runs unattended -> requires restricted
+  # Adopted 0.18 hardening for this unattended jobs use case (mirrors finance/hr):
+  #   - git_init: per-session workdir seeded as a git repo (audit trail of each run).
+  #   - rlimits: POSIX resource caps on any sandboxed subprocess child (restricted.py preexec_fn).
+  git_init: true
+  rlimits:
+    cpu: 300        # seconds; cap a runaway child
+    as_mb: 1024     # address-space cap (MB)
+    fsize_mb: 512   # max file a child may write (MB)
+    nofile: 256     # open file-descriptor cap
 
 server:
   enabled: true
@@ -150,7 +159,7 @@ jobs:
   webhooks:
     # HMAC-signed terminal-status callback to the CRM (Salesforce/Gainsight stand-in).
     # Default local sink so the demo runs offline.
-    - url: "${CRM_WEBHOOK_URL:http://localhost:9999/account-review}"
+    - url: "${CRM_WEBHOOK_URL:http://host.docker.internal:9999/account-review}"
       events: [completed, failed, timed_out]
       secret: "${CRM_WEBHOOK_SECRET:}"
       timeout: 15

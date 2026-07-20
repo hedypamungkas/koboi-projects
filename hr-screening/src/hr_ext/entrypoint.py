@@ -69,10 +69,13 @@ def build_app():
     return create_app(cfg, extra_hooks=[_as_extra_hook(ScoringAuditHook())])
 
 
-app = build_app()
-
-
 def main() -> None:
+    # Build at run time, not import time. Previously `app = build_app()` ran at
+    # module top level, so importing this module (in tests, or via uvicorn reload)
+    # parsed the config and required ${OPENAI_API_KEY} etc. to be set -- a missing
+    # config / unset env crashed every import instead of just the server start.
+    # Mirrors finance-reconciliation's lazy pattern -- P1 bug H.
+    app = build_app()
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", "8000")))
 
 

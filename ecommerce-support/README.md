@@ -91,7 +91,7 @@ curl -fsSL https://raw.githubusercontent.com/hedypamungkas/koboi-projects/main/q
 cd ecommerce-support
 cp .env.example .env        # fill in OPENAI_API_KEY (+ EMBEDDING_* if your gateway doesn't serve embeddings)
 docker compose build
-docker compose up -d
+docker compose up -d --wait    # waits for the compose healthcheck (/healthz)
 curl -sf http://localhost:8001/healthz && curl -sf http://localhost:8001/readyz
 ```
 

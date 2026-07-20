@@ -19,9 +19,11 @@ a parsed dict. It must be `json.loads`-ed here.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
+import threading
 import time
 
 from koboi.hooks.chain import Hook, HookContext, HookEvent
@@ -29,6 +31,10 @@ from koboi.hooks.chain import Hook, HookContext, HookEvent
 _logger = logging.getLogger(__name__)
 
 AUDIT_LOG_PATH = os.environ.get("HR_AUDIT_LOG_PATH", "/data/audit/scoring_audit.jsonl")
+# Serializes concurrent appends from pooled jobs (max_concurrent > 1) so two
+# large rows can't interleave their chunked BufferedWriter writes. Mirrors the
+# finance InvoiceAuditHook pattern.
+_AUDIT_LOCK = threading.Lock()
 
 
 class ScoringAuditHook(Hook):
@@ -55,9 +61,19 @@ class ScoringAuditHook(Hook):
             "recommendation": args.get("recommendation"),
             "tool_result": ctx.tool_result,
         }
-
-        os.makedirs(os.path.dirname(AUDIT_LOG_PATH), exist_ok=True)
-        with open(AUDIT_LOG_PATH, "a") as f:
-            f.write(json.dumps(record) + "\n")
+        if "_raw" in args:
+            # Preserve the unparseable input so the audit trail shows what the LLM
+            # actually emitted, not just all-None fields.
+            record["_raw"] = args["_raw"]
+        # Blocking file I/O off the event loop, under a lock -- this hook fires
+        # on every score_candidate across every pooled session.
+        await asyncio.to_thread(_append_record, record)
 
         return ctx
+
+
+def _append_record(record: dict) -> None:
+    os.makedirs(os.path.dirname(AUDIT_LOG_PATH) or ".", exist_ok=True)
+    line = json.dumps(record, ensure_ascii=False)
+    with _AUDIT_LOCK, open(AUDIT_LOG_PATH, "a", encoding="utf-8") as f:
+        f.write(line + "\n")

@@ -28,16 +28,16 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import threading
 import time
 
 from koboi.hooks.chain import Hook, HookContext, HookEvent
 
 AUDIT_LOG_PATH = os.environ.get("INVOICE_AUDIT_LOG", "/data/audit/invoice_audit.jsonl")
-
-# Created once at import time (also done defensively by entrypoint.py before
-# create_app() runs) rather than on every hook invocation -- os.makedirs with
-# exist_ok=True is cheap but pointless to repeat on every tool call.
-os.makedirs(os.path.dirname(AUDIT_LOG_PATH), exist_ok=True)
+# Serializes concurrent appends from pooled sessions (this hook runs on every
+# tool call across every session via asyncio.to_thread) so two large rows
+# can't interleave their chunked BufferedWriter writes -- audit-trail P2.
+_AUDIT_LOCK = threading.Lock()
 
 
 def _as_json_value(s: str | None):
@@ -85,5 +85,9 @@ class InvoiceAuditHook(Hook):
 
 
 def _append_row(row: dict) -> None:
-    with open(AUDIT_LOG_PATH, "a") as f:
-        f.write(json.dumps(row) + "\n")
+    # Lazy makedirs: was done at import time, which crashed the container boot
+    # if /data/audit wasn't writable on first import (init/volume race) -- P1 bug G.
+    os.makedirs(os.path.dirname(AUDIT_LOG_PATH) or ".", exist_ok=True)
+    line = json.dumps(row)
+    with _AUDIT_LOCK, open(AUDIT_LOG_PATH, "a", encoding="utf-8") as f:
+        f.write(line + "\n")

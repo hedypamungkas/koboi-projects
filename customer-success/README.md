@@ -96,7 +96,7 @@ bash quickstart.sh --project customer-success
 cd customer-success
 cp .env.example .env          # fill OPENAI_API_KEY / OPENAI_MODEL + EMBEDDING_* (proactive recall needs embeddings)
 docker compose build
-docker compose up -d
+docker compose up -d --wait    # waits for the compose healthcheck (/healthz)
 ```
 
 - Backend: `http://localhost:8010` · Frontend: `http://localhost:3010`

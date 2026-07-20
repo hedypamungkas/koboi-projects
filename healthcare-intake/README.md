@@ -143,8 +143,7 @@ Manual path:
 cd healthcare-intake
 cp .env.example .env          # fill in OPENAI_API_KEY (+ EMBEDDING_* if your gateway needs it)
 docker compose build
-docker compose up -d
-sleep 3
+docker compose up -d --wait    # waits for the compose healthcheck (/healthz)
 curl -sf http://localhost:8004/healthz    # -> {"status":"ok"}
 curl -sf http://localhost:8004/readyz     # -> {"status":"ok","checks":[...]}
 ```

@@ -72,8 +72,7 @@ flowchart TD
 ```bash
 cd hr-screening
 docker compose build
-docker compose up -d
-sleep 3
+docker compose up -d --wait    # waits for the compose healthcheck (/healthz)
 
 # Health + readiness
 curl -sf http://localhost:8002/healthz

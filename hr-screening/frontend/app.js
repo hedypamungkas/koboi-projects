@@ -153,6 +153,18 @@ function setDecision(jobId, decision) {
   render();
 }
 
+// Event delegation for the decision buttons. The old inline
+// onclick="setDecision('${r.job_id}',...)" interpolated a server value into a
+// JS-string attribute -- a job_id containing a quote would break out of the
+// string and execute arbitrary JS in the page (a real XSS sink, same class as
+// the real-estate finding). data-attributes are HTML-escaped at the sink and
+// read via dataset, so no string interpolation into executable context.
+resultsBody.addEventListener("click", (ev) => {
+  const btn = ev.target.closest(".decision-btn[data-job]");
+  if (!btn) return;
+  setDecision(btn.dataset.job, btn.dataset.decision);
+});
+
 function render() {
   const sorted = rows.size === 0 ? [] : [...rows.values()].sort((a, b) => (b.score || 0) - (a.score || 0));
   // Skip the rebuild when nothing changed since the last render. The table polls every 4s and a
@@ -186,8 +198,8 @@ function render() {
       const decision = r.decision
         ? `<span class="decision-chip decision-${r.decision}">${r.decision === "approve" ? "Approved for interview" : "Passed"}</span>`
         : `<div class="decision-actions">
-             <button class="decision-btn approve" onclick="setDecision('${r.job_id}','approve')">Approve</button>
-             <button class="decision-btn pass" onclick="setDecision('${r.job_id}','pass')">Pass</button>
+             <button class="decision-btn approve" data-job="${escapeHtml(r.job_id)}" data-decision="approve">Approve</button>
+             <button class="decision-btn pass" data-job="${escapeHtml(r.job_id)}" data-decision="pass">Pass</button>
            </div>`;
       const isNew = !renderedIds.has(r.job_id) ? " row-enter" : "";
       return `<tr class="result-row${isNew}">

@@ -10,6 +10,11 @@ COPY src ./src
 RUN pip install --no-cache-dir -e .
 COPY config ./config
 COPY scripts ./scripts
+# .dockerkeep makes /data non-empty so Docker seeds the named volume from this
+# non-root /data on first mount (empty dirs are skipped -> volume would be root-owned,
+# breaking USER app writes to the koboi sqlite sidecar).
+RUN useradd --create-home --uid 1000 app && mkdir -p /data && touch /data/.dockerkeep && chown -R app:app /app /data
+USER app
 EXPOSE 8000
 # Shell form so ${KOBOI_CONFIG} expands at container start.
 CMD koboi serve "config/${KOBOI_CONFIG:-concierge}.yaml" --host 0.0.0.0 --port 8000

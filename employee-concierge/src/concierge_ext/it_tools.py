@@ -7,7 +7,9 @@ are deny-gated at the FRONT-DOOR concierge config (policy.rules), so they never 
 
 from __future__ import annotations
 
+import hashlib
 import json
+import secrets
 import time
 
 from koboi.tools.registry import tool
@@ -52,7 +54,9 @@ async def lookup_asset(asset_or_owner: str) -> str:
 )
 async def reset_password(employee_id: str) -> str:
     # Mock: in production this would call the IdP. Returns a one-time reset link.
-    token = f"rst-{abs(hash(employee_id)) % 1000000:06d}"
+    # Stable across restarts: built-in hash() is randomized per process
+    # (PYTHONHASHSEED), so the same employee_id yielded a different token each run.
+    token = "rst-" + hashlib.sha256(str(employee_id).encode()).hexdigest()[:6]
     return f"Password reset initiated for {employee_id}. One-time setup link: https://reset.northwind.example/{token} (mock -- no real IdP call)."
 
 
@@ -74,5 +78,5 @@ async def reset_password(employee_id: str) -> str:
     risk_level=RiskLevel.SAFE,
 )
 async def request_access(employee_id: str, role: str, reason: str) -> str:
-    ticket = f"ACS-{int(time.time()) % 100000}"
+    ticket = f"ACS-{secrets.token_hex(3)}"
     return f"Access request {ticket} filed for {employee_id} -> {role} ({reason}). Routed to the access-owner for approval. (mock -- no real IAM change.)"

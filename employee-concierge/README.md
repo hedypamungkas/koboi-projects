@@ -111,8 +111,7 @@ OPENAI_API_KEY=sk-... bash quickstart.sh --project employee-concierge --yes
 cd employee-concierge
 cp .env.example .env     # fill in OPENAI_* + EMBEDDING_*; set A2A_ORG_SECRET to any non-empty string
 docker compose build
-docker compose up -d peer-it peer-facilities   # peers first (readiness — see caveats)
-docker compose up -d concierge web
+docker compose up -d --wait   # concierge depends_on healthy peers, so one command brings all 3 up in order
 ```
 
 - Concierge (front door): `http://localhost:8009` — auth `Authorization: Bearer $CONCIERGE_API_KEY`
