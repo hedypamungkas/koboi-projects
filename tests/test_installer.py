@@ -59,10 +59,35 @@ def test_yes_without_project_dies_cleanly():
 
 
 def test_no_color_flag_emits_no_ansi():
-    """P0-3: --no-color must actually disable color (was parsed too late = dead)."""
-    r = _run(["--no-color", "--list"])
-    assert r.returncode == 0
-    assert "\x1b[" not in r.stdout, "ANSI escape codes present despite --no-color"
+    """P0-3: --no-color must actually disable color.
+
+    Under pytest's piped stdout `[ -t 1 ]` is false, so colors are off REGARDLESS
+    of the pre-scan fix -- a plain subprocess call can't catch a regression. Run
+    under a pseudo-terminal so `[ -t 1 ]` is true; then ONLY the --no-color
+    pre-scan (exporting NO_COLOR before the color-init block) disables ANSI."""
+    try:
+        import pty
+    except ImportError:
+        pytest.skip("pty not available (non-Unix)")
+
+    def run_pty(argv):
+        pid, fd = pty.fork()
+        if pid == 0:  # child: stdin/stdout/stderr = the pty slave ([ -t 1 ] is true)
+            os.execvp(argv[0], argv)
+        out = b""
+        try:
+            while True:
+                chunk = os.read(fd, 4096)
+                if not chunk:
+                    break
+                out += chunk
+        except OSError:
+            pass
+        os.waitpid(pid, 0)
+        return out
+
+    out = run_pty(["bash", str(QS), "--no-color", "--list"]).decode(errors="replace")
+    assert "\x1b[" not in out, "ANSI escapes present despite --no-color (pre-scan regressed)"
 
 
 def test_no_utf8_flag_emits_no_raw_unicode():
@@ -80,8 +105,9 @@ def test_list_shows_all_ten_projects_and_ports():
                  "healthcare-intake", "legal-contract-review", "real-estate",
                  "insurance-claims", "market-intel", "employee-concierge", "customer-success"]:
         assert name in out, f"{name} missing from --list"
-    # Port table spot-checks.
-    assert ":8001" in out and ":8010" in out
+    # Port table: every port 8001-8010 must appear (not just the endpoints).
+    for port in range(8001, 8011):
+        assert f":{port}" in out, f"port :{port} missing from --list"
 
 
 def test_unknown_project_rejected():

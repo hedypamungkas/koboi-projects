@@ -153,9 +153,12 @@ function setDecision(jobId, decision) {
   render();
 }
 
-// Event delegation for the decision buttons (was inline onclick with a raw
-// job_id interpolated into a JS-string attribute -- a quote/paren in job_id
-// would break parsing). data-attributes are HTML-escaped at the sink.
+// Event delegation for the decision buttons. The old inline
+// onclick="setDecision('${r.job_id}',...)" interpolated a server value into a
+// JS-string attribute -- a job_id containing a quote would break out of the
+// string and execute arbitrary JS in the page (a real XSS sink, same class as
+// the real-estate finding). data-attributes are HTML-escaped at the sink and
+// read via dataset, so no string interpolation into executable context.
 resultsBody.addEventListener("click", (ev) => {
   const btn = ev.target.closest(".decision-btn[data-job]");
   if (!btn) return;

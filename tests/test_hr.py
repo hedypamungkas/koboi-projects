@@ -1,5 +1,5 @@
 """hr-screening tool tests: concurrency safety, input validation, corrupt-file
-quarantine (the proven data-loss cascade, bug #3)."""
+quarantine (the proven data-loss cascade; see ISSUES.md)."""
 from __future__ import annotations
 
 import asyncio
@@ -19,18 +19,25 @@ def _hr(tmp):
 
 def test_concurrent_scores_keep_all_records(tmp_path):
     hr = _hr(str(tmp_path))
+    calls = [("R-001", 80, "strong_match"), ("R-002", 30, "weak_match"),
+             ("R-003", 60, "possible_match"), ("R-004", 90, "strong_match"),
+             ("R-001", 75, "possible_match")]
 
+    # score_candidate is `async def` with no await, so a plain asyncio.gather runs
+    # it sequentially and never contests the threading.Lock. Run each call on its
+    # own OS thread (via asyncio.run inside to_thread) so the lock is genuinely
+    # exercised across threads -- the production condition (pooled jobs).
     async def race():
         await asyncio.gather(*[
-            hr.score_candidate(rid, s, "r", rec)
-            for rid, s, rec in [("R-001", 80, "strong_match"), ("R-002", 30, "weak_match"),
-                                ("R-003", 60, "possible_match"), ("R-004", 90, "strong_match"),
-                                ("R-001", 75, "possible_match")]
+            asyncio.to_thread(asyncio.run, hr.score_candidate(rid, s, "r", rec))
+            for rid, s, rec in calls
         ])
 
     asyncio.run(race())
     q = json.loads((tmp_path / "review_queue.json").read_text())
+    # All 5 recorded AND every entry is well-formed (no interleaved/half-written JSON).
     assert len(q) == 5, f"concurrent writes lost records: only {len(q)}/5 persisted"
+    assert len({e["resume_id"] + str(e["score"]) for e in q}) == 5, "duplicate/garbled entries"
 
 
 @pytest.mark.parametrize("bad_score,rec,label", [
@@ -38,6 +45,8 @@ def test_concurrent_scores_keep_all_records(tmp_path):
     (-5, "strong_match", "below range"),
     (float("nan"), "strong_match", "NaN"),
     (float("inf"), "strong_match", "Inf"),
+    (True, "strong_match", "bool (True==1 would slip $1 through)"),
+    (None, "strong_match", "None"),
     (50, "bogus", "bad recommendation enum"),
 ])
 def test_invalid_inputs_rejected(tmp_path, bad_score, rec, label):
@@ -59,24 +68,25 @@ def test_corrupt_file_quarantined_not_wiped(tmp_path):
 
 
 def test_audit_hook_handles_malformed_tool_arguments():
-    """ScoringAuditHook must not crash/drop on malformed LLM JSON (P2 robustness)."""
-    import json as _json
+    """ScoringAuditHook must not crash/drop on malformed LLM JSON (P2 robustness)
+    -- and must actually WRITE a record (with _raw fallback), not silently no-op."""
     from types import SimpleNamespace
     from hr_ext.hooks import ScoringAuditHook
+    import hr_ext.hooks as h
+
+    audit_dir = tempfile.mkdtemp()
+    h.AUDIT_LOG_PATH = os.path.join(audit_dir, "audit.jsonl")
 
     async def run(raw):
-        ctx = SimpleNamespace(
-            tool_name="score_candidate",
-            tool_arguments=raw,
-            tool_result="ok",
-        )
-        hk = ScoringAuditHook()
-        # execute() writes to AUDIT_LOG_PATH under /data -- point it at a temp dir.
-        import hr_ext.hooks as h
-        h.AUDIT_LOG_PATH = os.path.join(tempfile.mkdtemp(), "audit.jsonl")
-        return await hk.execute(ctx)
+        ctx = SimpleNamespace(tool_name="score_candidate", tool_arguments=raw, tool_result="ok")
+        return await ScoringAuditHook().execute(ctx)
 
-    # Malformed JSON -> hook records a _raw entry, does not raise.
-    asyncio.run(run("{not json"))
-    # No tool_arguments -> still no raise.
-    asyncio.run(run(None))
+    asyncio.run(run("{not json"))   # malformed -> _raw fallback record
+    asyncio.run(run(None))          # no args -> still no raise
+
+    # Read back: both records persisted (not dropped), malformed one carries _raw.
+    lines = [l for l in open(h.AUDIT_LOG_PATH).read().splitlines() if l.strip()]
+    assert len(lines) == 2, f"audit hook dropped records: {len(lines)}/2 written"
+    import json as _json
+    first = _json.loads(lines[0])
+    assert "_raw" in first, f"malformed-args record should carry _raw fallback: {first}"

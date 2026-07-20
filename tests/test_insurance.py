@@ -24,15 +24,21 @@ def test_routine_recommendation_recorded(tmp_path):
 
 @pytest.mark.parametrize("rationale", ["Total Loss per adjuster", "TOTAL LOSS", "vehicle is a total loss"])
 def test_total_loss_routed_to_human_regardless_of_case(tmp_path, rationale):
+    """The in-tool guard is DEFENSE-IN-DEPTH: koboi's policy.rules already denies
+    `*total loss*` case-insensitively (harness/policy.py fnmatches on lowered
+    values). This pins the secondary net so a future config/policy change can't
+    silently unmask the safety-critical path."""
     cl = _cl(tmp_path)
     out = asyncio.run(cl.record_recommendation("CLM-9", 5000.0, rationale))
-    assert "human" in out.lower(), f"case variant {rationale!r} bypassed the deny: {out!r}"
+    assert "human" in out.lower(), f"case variant {rationale!r} bypassed the in-tool net: {out!r}"
     # And nothing was recorded.
     assert not (tmp_path / "rec.jsonl").exists() or not (tmp_path / "rec.jsonl").read_text().strip()
 
 
-@pytest.mark.parametrize("bad", [float("nan"), float("inf"), -100, "cheap"])
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), -100, "cheap", True, None])
 def test_bad_amount_rejected(tmp_path, bad):
     cl = _cl(tmp_path)
     out = asyncio.run(cl.record_recommendation("CLM-1", bad, "routine"))
     assert out.startswith("Error:"), f"bad amount {bad!r} should be rejected, got {out!r}"
+    # bool/None must not be recorded (bool is a bool, not a number; True==1 would slip $1 through).
+    assert not (tmp_path / "rec.jsonl").exists() or not (tmp_path / "rec.jsonl").read_text().strip()

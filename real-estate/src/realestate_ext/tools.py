@@ -123,12 +123,20 @@ _DRAFT_LOCK = threading.Lock()
 
 
 def _save_draft(kind: str, key: str, draft: str) -> None:
-    """Append one draft record to the durable review queue."""
+    """Append one draft record to the durable review queue.
+
+    This is an append-only JSONL log, so it does NOT need the temp-file+rename
+    dance hr's review_queue uses (that one is a read-modify-write JSON *array*
+    -- a different, race-prone access pattern). Append-only under a lock is the
+    durable-log pattern: no interleaving, no lost updates. The only residual
+    risk is a partial trailing line if the process dies / disk fills mid-write;
+    a JSONL reader should skip a malformed final line (standard practice)."""
     os.makedirs(os.path.dirname(DRAFTS_LOG_PATH) or ".", exist_ok=True)
     record = {"kind": kind, "key": key, "draft": draft, "saved_at": time.time()}
     line = json.dumps(record, ensure_ascii=False)
     with _DRAFT_LOCK, open(DRAFTS_LOG_PATH, "a", encoding="utf-8") as f:
         f.write(line + "\n")
+        f.flush()  # push to OS ASAP so a crash after this call still leaves the line
 
 
 @tool(

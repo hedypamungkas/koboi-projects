@@ -121,7 +121,7 @@ async def score_churn_risk(account_id: str) -> str:
     trend = h["active_users_trend"]
     # trend_pct preserves the sign ("-18%" -> -18), so for a declining trend the
     # magnitude is -trend_pct. The previous `trend_pct >= 10` was unreachable for
-    # ANY "-" trend (startswtith("-") => trend_pct <= 0, never >= 10), making the
+    # ANY "-" trend (startswith("-") => trend_pct <= 0, never >= 10), making the
     # +20 "major decline" branch dead code -- P1 bug C.
     trend_pct = int(trend.rstrip("%+-")) if trend.lstrip("+-").rstrip("%").isdigit() else 0
     if trend.startswith("-") and (-trend_pct) >= 10:

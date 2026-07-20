@@ -22,7 +22,7 @@ from koboi.types import RiskLevel
 REVIEW_QUEUE_PATH = os.environ.get("HR_REVIEW_QUEUE_PATH", "/data/review_queue.json")
 # Serializes concurrent score_candidate writes across pooled jobs
 # (jobs.max_concurrent > 1) so the read-modify-write can't lose updates or
-# leave a half-written file -- the proven data-loss cascade (bug #3).
+# leave a half-written file -- the proven data-loss cascade (see ISSUES.md).
 _QUEUE_LOCK = threading.Lock()
 _VALID_RECS = ("strong_match", "possible_match", "weak_match")
 
@@ -123,7 +123,7 @@ async def score_candidate(resume_id: str, score: float, rationale: str, recommen
     # Atomic + locked persistence: temp-write then os.replace so a crash can't
     # leave a truncated file, and the lock prevents lost updates under
     # max_concurrent > 1. On a corrupt read we quarantine the file instead of
-    # silently wiping the queue (the old `queue = []` reset) -- bug #3.
+    # silently wiping the queue (the old `queue = []` reset; see ISSUES.md).
     with _QUEUE_LOCK:
         queue: list[dict] = []
         if os.path.exists(REVIEW_QUEUE_PATH):
@@ -133,11 +133,21 @@ async def score_candidate(resume_id: str, score: float, rationale: str, recommen
                 if isinstance(data, list):
                     queue = data
             except (json.JSONDecodeError, OSError):
+                # Quarantine the unreadable file so prior scores aren't lost.
                 corrupt = f"{REVIEW_QUEUE_PATH}.corrupt.{int(time.time())}"
                 try:
                     os.replace(REVIEW_QUEUE_PATH, corrupt)
                 except OSError:
-                    pass
+                    # Could not quarantine (e.g. permission/I-O error on the same
+                    # path that just failed to read). Do NOT fall through to the
+                    # write below -- os.replace(tmp, REVIEW_QUEUE_PATH) would
+                    # overwrite and destroy the very file we failed to read,
+                    # silently wiping the queue (the bug this fix exists to close).
+                    return (
+                        f"Error: review queue at {REVIEW_QUEUE_PATH} is unreadable "
+                        f"and could not be quarantined; a human must inspect before "
+                        f"scoring resumes."
+                    )
                 queue = []
         queue.append(entry)
         tmp = f"{REVIEW_QUEUE_PATH}.tmp"

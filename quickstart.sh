@@ -34,6 +34,7 @@ QHOME="$HOME/.koboi-quickstart"
 LOG_DIR="$QHOME/logs"; LOCK_DIR="$QHOME/locks"
 mkdir -p "$LOG_DIR" "$LOCK_DIR" || { echo "cannot create $QHOME (read-only HOME? set KOBOI_UC_HOME)." >&2; exit 1; }
 HAVE_CURL=0   # set by preflight()
+HEALTH_UNVERIFIED=0   # set by wait_health when it cannot probe (/healthz not checked)
 
 # name|title|one-liner|backend_port   (frontend port = backend_port - 5000)
 PROJECTS=(
@@ -244,7 +245,7 @@ bootstrap_repo() {
   if is_repo_root "$REPO_HOME"; then
     REPO_ROOT="$REPO_HOME"
     if has_tty && [ "$(prompt "Update existing checkout at $REPO_ROOT with git pull?" "Y/n")" != "n" ]; then
-      git -C "$REPO_ROOT" pull --ff-only >/dev/null 2>&1 && ok "Updated." || warn "pull failed -- continuing with existing files."
+      local pout; pout="$(git -C "$REPO_ROOT" pull --ff-only 2>&1)" && ok "Updated." || warn "pull failed -- continuing with existing files. Reason: $(printf '%s' "$pout" | tail -1)"
     fi; return 0
   fi
   if has_tty && [ "$(prompt "Clone koboi-projects to $REPO_HOME?" "Y/n")" = "n" ]; then die "No repo available."; fi
@@ -345,7 +346,8 @@ wait_health() {  # returns 0 healthy, 1 timed out
   local backend="$1" i code
   step "Waiting for koboi to be healthy on :$backend"
   if [ "$HAVE_CURL" = "0" ]; then
-    warn "curl missing -- cannot probe /healthz; waiting 15s and assuming the container started."
+    HEALTH_UNVERIFIED=1
+    warn "curl missing -- CANNOT verify /healthz. Waiting 15s and HOPING the container started; the URL below may fail. If it does, run 'quickstart.sh --logs <project>'."
     sleep 15; return 0
   fi
   for i in $(seq 1 90); do
@@ -386,6 +388,7 @@ print_summary() {
     key="${_line#CONCIERGE_API_KEY=}"   # parameter expansion (cut -f2 mangles keys containing '=')
   fi
   echo; box "$project is up"
+  [ "$HEALTH_UNVERIFIED" = "1" ] && warn "health was NOT verified (curl missing) -- the URL below is best-effort and may not respond yet."
   cat <<EOF
   ${C_BOLD}Web UI${R}   http://localhost:$front       ${C_DIM}(open this in your browser)${R}
   ${C_BOLD}API${R}      http://localhost:$backend     ${C_DIM}(/healthz, /v1/chat/stream, /v1/jobs)${R}
@@ -503,7 +506,11 @@ cmd_down() {
   docker compose --progress plain -f "$REPO_ROOT/$PROJECT_DIR/docker-compose.yml" down $extra >/dev/null 2>&1 \
     && ok "stopped $PROJECT_DIR$([ -n "$extra" ] && echo ' (+volumes)')" || warn "stop had issues; see 'docker ps'."
 }
-cmd_update() { resolve_repo_root; git -C "$REPO_ROOT" pull --ff-only >/dev/null 2>&1 && ok "updated $REPO_ROOT" || warn "git pull failed (cloned via tarball?)."; }
+cmd_update() {
+  resolve_repo_root
+  local pout; pout="$(git -C "$REPO_ROOT" pull --ff-only 2>&1)" && ok "updated $REPO_ROOT" \
+    || warn "git pull failed. Reason: $(printf '%s' "$pout" | tail -1)  (cloned via tarball?)"
+}
 
 usage() {
   cat <<EOF

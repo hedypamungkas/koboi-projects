@@ -113,7 +113,21 @@ def test_backend_dockerfile_non_root(uc):
     )
 
 
-def test_concierge_waits_for_healthy_peers():
+def test_market_intel_stream_timeout_exceeds_llm_timeout():
+    """market-intel: the chat stream timeout must be >= llm.timeout + headroom,
+    else the client cuts off a legit long deep_research while the backend still
+    works (the timeout-inversion bug)."""
+    import re
+    appjs = (uc_path("market-intel") / "frontend" / "app.js").read_text()
+    cfg = yaml.safe_load(config_path("market-intel").read_text())
+    m = re.search(r"STREAM_TIMEOUT_MS\s*=\s*([\d_]+)", appjs)
+    assert m, "market-intel app.js: STREAM_TIMEOUT_MS not found"
+    stream_ms = int(m.group(1).replace("_", ""))  # handle JS numeric separators (330_000)
+    llm_timeout_s = cfg.get("llm", {}).get("timeout")
+    assert llm_timeout_s, "market-intel config: llm.timeout not found"
+    assert stream_ms >= llm_timeout_s * 1000 + 30000, (
+        f"market-intel: STREAM_TIMEOUT_MS ({stream_ms}ms) < llm.timeout ({llm_timeout_s}s)+headroom -- timeout inversion"
+    )
     """employee-concierge's front door must gate on peer-it + peer-facilities being
     healthy, not just started (the A2A start-order race)."""
     doc = yaml.safe_load((uc_path("employee-concierge") / "docker-compose.yml").read_text())
@@ -125,28 +139,39 @@ def test_concierge_waits_for_healthy_peers():
         )
 
 
-# ---- docker: root .dockerignore exists -------------------------------------
-def test_root_dockerignore_exists():
-    assert (REPO_ROOT / ".dockerignore").is_file(), "no root .dockerignore -- build context carries .git/__pycache__/.env slop"
+# ---- docker: .dockerignore at the build-context root (each use-case dir) ---
+# Docker reads .dockerignore from the BUILD-CONTEXT root. Each compose service
+# uses `context: .` (the use-case dir), so a .dockerignore at the repo root is
+# never consulted -- it must live in each use-case dir or .env (secrets) leaks
+# into the build context.
+@pytest.mark.parametrize("uc", UCS)
+def test_dockerignore_at_build_context_root(uc):
+    di = uc_path(uc) / ".dockerignore"
+    assert di.is_file(), f"{uc}: no .dockerignore in the use-case dir (the build-context root)"
+    body = di.read_text()
+    assert ".env" in body, f"{uc}: .dockerignore does not exclude .env (secret leak into build context)"
 
 
-# ---- frontend: no raw dynamic innerHTML sinks ------------------------------
-# An innerHTML assignment interpolating ${...} is safe only if the value is
-# wrapped in an escaping helper (escapeHtml/md/mdBrief) or is a known constant.
-_RAW_INNERHTML = re.compile(r"\.innerHTML\s*[+]?=\s*`[^`]*\$\{([^}`]+)\}")
+# ---- frontend: no raw dynamic innerHTML/insertAdjacentHTML sinks ------------
+# Static scan for template-literal sinks (innerHTML/outerHTML assignments and
+# insertAdjacentHTML) interpolating ${...}. A sink is safe only if the value is
+# wrapped in an escaping helper or is a known constant. NOTE: this catches
+# template-literal interpolation, the form used in this repo; it cannot catch
+# arbitrary `innerHTML = "<x>" + dynamic` string-concat (no static scanner can
+# without a JS parser) -- the escapeHtml helper + code review cover that.
+_RAW_HTML_SINK = re.compile(r"(?:\.innerHTML|\.outerHTML)\s*[+]?=\s*`[^`]*\$\{([^}`]+)\}|insertAdjacentHTML\([^,]*,\s*`[^`]*\$\{([^}`]+)\}")
 _SAFE = re.compile(r"(escapeHtml|escHtml|escape\(|md\(|mdBrief\(|sanitiz)")
 _CONST = re.compile(r"^(ROLE\.|ICON|empty|<)", re.I)
 
 
 @pytest.mark.parametrize("uc", UCS)
-def test_frontend_no_raw_innerhtml_sink(uc):
+def test_frontend_no_raw_html_sink(uc):
     appjs = uc_path(uc) / "frontend" / "app.js"
     if not appjs.is_file():
         pytest.skip(f"{uc}: no frontend/app.js")
     for line_no, line in enumerate(appjs.read_text().splitlines(), 1):
-        for m in _RAW_INNERHTML.finditer(line):
-            expr = m.group(1).strip()
-            # whole innerHTML already checked by helper on the line, or const/empty.
+        for m in _RAW_HTML_SINK.finditer(line):
+            expr = (m.group(1) or m.group(2) or "").strip()
             if _SAFE.search(line) or _CONST.match(expr):
                 continue
-            pytest.fail(f"{uc}/frontend/app.js:{line_no}: raw innerHTML sink `${{{expr}}}` -- escape it (XSS)")
+            pytest.fail(f"{uc}/frontend/app.js:{line_no}: raw HTML sink `${{{expr}}}` -- escape it (XSS)")

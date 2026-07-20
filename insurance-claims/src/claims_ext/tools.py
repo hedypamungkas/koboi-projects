@@ -201,10 +201,12 @@ async def screen_fraud(claim_id: str) -> str:
     risk_level=RiskLevel.SAFE,
 )
 async def record_recommendation(claim_id: str, amount: float, rationale: str) -> str:
-    # Defense-in-depth for the policy.rules "*total loss*" deny: that glob is
-    # case-sensitive in koboi 0.18.x, so "Total Loss"/"TOTAL LOSS" would bypass
-    # it. A total-loss claim must never get an auto-recommendation, so enforce
-    # it here too, case-insensitively (P1 bug D).
+    # Defense-in-depth: the policy.rules argument glob "*total loss*" is matched
+    # case-insensitively by koboi (harness/policy.py uses fnmatch on lowered
+    # values), so a total-loss rationale is already deny-gated at the policy
+    # layer. Re-check it here too so a future config edit that removes the policy
+    # rule (or a koboi policy-engine change) can't silently unmask this
+    # safety-critical path. The policy gate is the primary defense; this is the net.
     if "total loss" in (rationale or "").lower():
         return (
             "Cannot auto-recommend on a total-loss claim -- route to a human "

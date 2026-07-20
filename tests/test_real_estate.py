@@ -21,16 +21,19 @@ def test_concurrent_drafts_all_persist(tmp_path):
     import realestate_ext.tools as re
     re.DRAFTS_LOG_PATH = str(tmp_path / "drafts.jsonl")
 
+    # These tools are `async def` with no await, so asyncio.gather runs them
+    # sequentially. Run each on its own OS thread to genuinely contest _DRAFT_LOCK.
     async def race():
         await asyncio.gather(
-            re.draft_listing_description("P-101"),
-            re.draft_listing_description("P-102"),
-            re.draft_followup_email("L-001"),
-            re.draft_followup_email("L-002"),
+            asyncio.to_thread(asyncio.run, re.draft_listing_description("P-101")),
+            asyncio.to_thread(asyncio.run, re.draft_listing_description("P-102")),
+            asyncio.to_thread(asyncio.run, re.draft_followup_email("L-001")),
+            asyncio.to_thread(asyncio.run, re.draft_followup_email("L-002")),
         )
 
     asyncio.run(race())
-    recs = [json.loads(l) for l in (tmp_path / "drafts.jsonl").read_text().splitlines() if l.strip()]
+    lines = [l for l in (tmp_path / "drafts.jsonl").read_text().splitlines() if l.strip()]
+    recs = [json.loads(l) for l in lines]  # raises on any interleaved/half-written line
     assert len(recs) == 4, f"concurrent drafts lost: {len(recs)}/4"
 
 
