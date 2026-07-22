@@ -190,9 +190,23 @@ def test_frontend_api_base_uses_hostname(uc):
     if not appjs.is_file():
         pytest.skip(f"{uc}: no frontend/app.js")
     src = appjs.read_text()
-    assert "window.location.hostname" in src, (
-        f"{uc}/frontend/app.js: API_BASE must derive the host from "
-        "window.location.hostname (remote-safe), not a hardcoded localhost"
+    # hostname must be used INSIDE the API_BASE expression (between the
+    # assignment and its terminating ';'), not merely mentioned in a comment --
+    # a hardcoded `API_BASE = "http://localhost:NNNN"` only works when the
+    # browser runs on the Docker host; opening the UI from a remote machine
+    # (e.g. a VPS IP) sends every fetch to the viewer's own localhost.
+    assert re.search(r'API_BASE\b[^;]{0,200}window\.location\.hostname', src), (
+        f"{uc}/frontend/app.js: API_BASE must use window.location.hostname in "
+        "its own expression (remote-safe), not hardcode localhost or only "
+        "mention hostname in a comment"
+    )
+    # The web-port gate (window.location.port === "<webport>") makes API_BASE
+    # derive the backend host from the page origin and fall back to same-origin
+    # "" behind a reverse proxy, instead of forcing a cross-origin host:port.
+    assert re.search(r'window\.location\.port\s*===\s*"\d{4}"', src), (
+        f"{uc}/frontend/app.js: API_BASE must gate on "
+        "window.location.port === \"<webport>\" (falling back to same-origin \"\" "
+        "behind a reverse proxy)"
     )
     assert not re.search(r'API_BASE\s*=\s*"http://localhost', src), (
         f"{uc}/frontend/app.js: hardcoded localhost API_BASE -- breaks when "

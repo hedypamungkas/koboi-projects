@@ -6,7 +6,6 @@ services:
     ports: ["8005:8000"]
     volumes: ["koboi-data:/data", "./playbook_skills:/app/playbook_skills:ro"]
     env_file: [.env]
-    extra_hosts: ["host.docker.internal:host-gateway"]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/healthz', timeout=2).status == 200 else 1)"]
       interval: 5s

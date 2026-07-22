@@ -104,13 +104,13 @@ Requires **Docker** ([Docker Desktop](https://docs.docker.com/desktop/) for macO
    sudo systemctl enable --now docker
    ```
 
-4. **Firewall / remote access.** Apps bind host ports `3001`–`3010` (web UIs) and `8001`–`8010` (APIs). For a quick remote test, use an **SSH tunnel** (opens nothing publicly):
+4. **Firewall / remote access.** Apps bind host ports `3001`–`3010` (web UIs) and `8001`–`8010` (APIs). The frontend derives the API host from the page's own hostname, so the browser must reach **both** the web port *and* the API port for a given app (e.g. `3001` *and* `8001` for ecommerce-support — see the port table below). For a quick remote test, use an **SSH tunnel** that forwards both (opens nothing publicly):
 
    ```sh
-   ssh -L 3001:localhost:3001 ubuntu@<vps>     # then open http://localhost:3001 locally
+   ssh -L 3001:localhost:3001 -L 8001:localhost:8001 ubuntu@<vps>     # then open http://localhost:3001 locally
    ```
 
-   To open a port instead, allow only the one you need — `sudo ufw allow 3001/tcp`. **Don't open all ports broadly.**
+   To open ports instead, allow the pair you need — `sudo ufw allow 3001/tcp && sudo ufw allow 8001/tcp`. **Don't open all ports broadly.** (Swap in each app's own `30XX`/`80XX`.)
 
 5. **Headless deploy over SSH** (no prompts) — `--yes` skips every prompt:
 
