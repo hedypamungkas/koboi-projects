@@ -12,9 +12,10 @@ const API_KEY = ""; // would come from a login/config step if AUTH_REQUIRED were
 // The web container (nginx, static files only) and the koboi container are
 // separate origins in docker-compose.yml (localhost:3001 vs localhost:8001),
 // so calls go cross-origin -- that's why config/agent.yaml sets
-// server.cors.allow_origins: ["*"]. In production you'd put both behind one
-// reverse-proxy host and this could be a relative path instead.
-const API_BASE = "http://localhost:8001";
+// server.cors.allow_origins: ["*"]. API_BASE resolves the backend host from
+// the page's own hostname (remote-safe for localhost, a VPS IP, or a domain);
+// behind one reverse-proxy host it falls back to same-origin "".
+const API_BASE = window.KOBOI_API_BASE || (window.location.port === "3001" ? `${window.location.protocol}//${window.location.hostname}:8001` : "");
 
 const chatLog = document.getElementById("chat-log");
 const chatForm = document.getElementById("chat-form");

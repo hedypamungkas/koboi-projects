@@ -13,6 +13,7 @@ services:
     ports: ["8011:8000"]
     volumes: ["koboi-data-it:/data"]
     env_file: [.env]
+    extra_hosts: ["host.docker.internal:host-gateway"]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/healthz', timeout=2).status == 200 else 1)"]
       interval: 5s
@@ -29,6 +30,7 @@ services:
     ports: ["8012:8000"]
     volumes: ["koboi-data-fac:/data"]
     env_file: [.env]
+    extra_hosts: ["host.docker.internal:host-gateway"]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/healthz', timeout=2).status == 200 else 1)"]
       interval: 5s
@@ -47,6 +49,7 @@ services:
     ports: ["8009:8000"]
     volumes: ["koboi-data-concierge:/data"]
     env_file: [.env]
+    extra_hosts: ["host.docker.internal:host-gateway"]
     # Wait for both peers to be genuinely healthy (not just started) so the
     # concierge's A2A verify succeeds on boot instead of marking peers uncallable
     # for the first few requests (the documented compose start-order race).

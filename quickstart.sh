@@ -196,6 +196,58 @@ trap '' PIPE                      # don't die/noise when output is piped to `hea
 emit() { printf "$@" 2>/dev/null || true; }
 
 # ──────────────────────────── preflight: Docker ───────────────────────────
+# Classify a Docker daemon failure so we print the RIGHT remedy. On a fresh
+# Linux box the daemon is usually already up -- the failure is "permission
+# denied" (this user isn't in the docker group), which the old single die()
+# here mistook for a stopped daemon and "fixed" with a no-op
+# `sudo systemctl start docker`. We capture docker's stderr to tell the cases
+# apart -- the original `docker info >/dev/null 2>&1` discarded it, so every
+# failure looked like "daemon not running".
+check_docker_daemon() {
+  docker info >/dev/null 2>&1 && return 0          # daemon reachable: done
+  # Second call only on failure: capture stderr (the human reason) into $msg.
+  # On the failure path docker prints nothing to stdout, so merging 2>&1 is
+  # enough and avoids the SC2069 `2>&1 >/dev/null` swap. Declared separately
+  # from the assignment so we don't mask an exit code via `local x=$( )`.
+  local msg; msg="$(docker info 2>&1 | tr -d '\r' | tail -n 6)"
+  local dock; dock="$(command -v docker 2>/dev/null || true)"
+  local rootless=0 snap=0
+  [ -n "${DOCKER_HOST:-}" ] && rootless=1
+  case "$dock" in /snap/*) snap=1 ;; esac
+  case "$msg" in
+    *"permission denied"*|*"Permission denied"*|*"dial unix"*|*"got permission denied"*)
+      cat >&2 <<EOF
+${C_RED}${G_X} Docker is installed and the daemon is running -- but this user can't reach it.${R}
+
+The Docker daemon socket on Linux is owned by ${C_BOLD}root:docker${R}. Add yourself to the
+docker group (the standard fix), then re-run this script:
+
+  ${C_BOLD}sudo usermod -aG docker \$USER${R}
+  ${C_BOLD}newgrp docker${R}        ${C_DIM}(or log out and back in)${R}
+
+Or, as a one-off, run the whole quickstart under sudo:
+
+  ${C_BOLD}curl -fsSL https://raw.githubusercontent.com/hedypamungkas/koboi-projects/main/quickstart.sh | sudo bash${R}
+EOF
+      [ "$rootless" = "1" ] && warn "rootless Docker detected (DOCKER_HOST=${DOCKER_HOST:-}); the rootless daemon may be down -- start it: systemctl --user start docker."
+      [ "$snap" = "1" ] && warn "snap Docker detected ($dock); it uses stricter confinement -- if the group fix fails, try 'sudo snap start docker' or install Docker via apt instead."
+      exit 1 ;;
+    *"Cannot connect to the Docker daemon"*|*"Is the docker daemon running"*|*"connection refused"*|*"No such file or directory"*)
+      cat >&2 <<EOF
+${C_RED}${G_X} Docker daemon is not reachable.${R}
+
+Start it, then re-run:
+  ${C_BOLD}Linux:${R}          sudo systemctl start docker ${C_DIM}&&${R} ${C_BOLD}sudo systemctl enable docker${R}
+  ${C_BOLD}macOS / Windows:${R}  start Docker Desktop
+EOF
+      [ "$rootless" = "1" ] && warn "rootless Docker detected (DOCKER_HOST=${DOCKER_HOST:-}); start it: systemctl --user start docker."
+      exit 1 ;;
+    *)
+      die "Could not reach the Docker daemon (unexpected error):
+$(printf '%s\n' "$msg" | sed 's/^/    /')" ;;
+  esac
+}
+
 preflight() {
   step "Checking prerequisites"
   if ! command -v docker >/dev/null 2>&1; then
@@ -210,7 +262,7 @@ EOF
     exit 1
   fi
   docker compose version >/dev/null 2>&1 || die "Docker is installed but the 'docker compose' v2 plugin is missing (https://docs.docker.com/compose/install/)."
-  docker info >/dev/null 2>&1 || die "Docker daemon is not running. Start Docker Desktop (macOS/Windows) or 'sudo systemctl start docker' (Linux)."
+  check_docker_daemon
   if command -v curl >/dev/null 2>&1; then HAVE_CURL=1; else
     HAVE_CURL=0; warn "curl not found -- health checks will be skipped and the tarball clone fallback is unavailable (git clone still works)."
   fi

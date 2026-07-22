@@ -175,3 +175,26 @@ def test_frontend_no_raw_html_sink(uc):
             if _SAFE.search(line) or _CONST.match(expr):
                 continue
             pytest.fail(f"{uc}/frontend/app.js:{line_no}: raw HTML sink `${{{expr}}}` -- escape it (XSS)")
+
+
+# ---- frontend: API_BASE resolves from the browser hostname (remote-safe) ----
+# A hardcoded `API_BASE = "http://localhost:NNNN"` only works when the browser
+# runs on the Docker host itself; opening the UI from a remote machine (e.g. a
+# VPS IP) sends every fetch to the viewer's own localhost and it fails. The base
+# must be derived from window.location.hostname instead, so the same bundle works
+# from localhost, a VPS IP, or a domain (and falls back to same-origin "" behind
+# a reverse proxy).
+@pytest.mark.parametrize("uc", UCS)
+def test_frontend_api_base_uses_hostname(uc):
+    appjs = uc_path(uc) / "frontend" / "app.js"
+    if not appjs.is_file():
+        pytest.skip(f"{uc}: no frontend/app.js")
+    src = appjs.read_text()
+    assert "window.location.hostname" in src, (
+        f"{uc}/frontend/app.js: API_BASE must derive the host from "
+        "window.location.hostname (remote-safe), not a hardcoded localhost"
+    )
+    assert not re.search(r'API_BASE\s*=\s*"http://localhost', src), (
+        f"{uc}/frontend/app.js: hardcoded localhost API_BASE -- breaks when "
+        "the UI is opened from a remote browser"
+    )

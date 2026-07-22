@@ -17,7 +17,7 @@
 // create a token via `koboi keys create` and send it as `Authorization: Bearer
 // <token>`.
 
-const API_BASE = window.KOBOI_API_BASE || "http://localhost:8004";
+const API_BASE = window.KOBOI_API_BASE || (window.location.port === "3004" ? `${window.location.protocol}//${window.location.hostname}:8004` : "");
 
 let sessionId = null;
 

@@ -1,7 +1,7 @@
 // app.js -- Beacon Mutual claims-triage console (case-file/ledger UI).
 // Vanilla JS, talks to koboi's single-agent /v1/chat/stream (SSE). See docs/00 §3.
 
-const API_BASE = window.KOBOI_API_BASE || "http://localhost:8007";
+const API_BASE = window.KOBOI_API_BASE || (window.location.port === "3007" ? `${window.location.protocol}//${window.location.hostname}:8007` : "");
 const API_KEY = window.KOBOI_API_KEY || ""; // auth_required:false for this POC
 
 let sessionId = null;

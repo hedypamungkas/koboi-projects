@@ -1,10 +1,11 @@
 // app.js -- Ledgerline controller dashboard: mock flagged-invoice panel + chat
 // wired to koboi's /v1/chat/stream (SSE), per docs/00-consuming-koboi-server.md Sec.3.
 
-// koboi is published on localhost:8003 by docker-compose.yml (backend maps 8003->8000).
-// Override by setting `window.KOBOI_API_BASE` before this script loads, e.g. via a
-// small inline <script> tag, if you deploy behind a different host/port.
-const API_BASE = window.KOBOI_API_BASE || "http://localhost:8003";
+// koboi is published on :8003 by docker-compose.yml (backend maps 8003->8000); API_BASE
+// resolves that host from the page's own hostname, so it works from localhost, a VPS IP,
+// or a domain. Override by setting `window.KOBOI_API_BASE` before this script loads (e.g.
+// a small inline <script> tag); behind a reverse proxy it falls back to same-origin "".
+const API_BASE = window.KOBOI_API_BASE || (window.location.port === "3003" ? `${window.location.protocol}//${window.location.hostname}:8003` : "");
 
 // This POC runs with server.auth_required: false (see README), so no bearer token
 // is required. If you flip that on, set API_KEY here and it will be sent along.

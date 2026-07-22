@@ -8,6 +8,7 @@ and the `bash -n` + shellcheck syntax gates. Runs the script's own subcommands
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import subprocess
 
@@ -123,3 +124,51 @@ def test_ps1_daemon_check_uses_lastexitcode():
     assert "$LASTEXITCODE" in src, "ps1 daemon check doesn't test $LASTEXITCODE (P0-2)"
     # And the broken try/catch on docker info should be gone.
     assert "try { docker info" not in src, "ps1 still uses try/catch around docker info"
+
+
+def _fake_docker_env(tmp_path, info_line):
+    """Put a fake `docker` on PATH so preflight's daemon check can be exercised
+    without a real daemon. `docker compose ...` -> ok; `docker info` -> print
+    `info_line` to stderr and exit 1 (mirroring how docker reports the reason).
+    Scoped to the subprocess via PATH; does not touch the real docker."""
+    shim = tmp_path / "docker"
+    shim.write_text(
+        "#!/usr/bin/env bash\n"
+        'case "$1" in\n'
+        "  compose) exit 0 ;;\n"
+        f"  info) echo {shlex.quote(info_line)} >&2; exit 1 ;;\n"
+        "esac\n"
+        "exit 0\n"
+    )
+    shim.chmod(0o755)
+    return {"PATH": f"{tmp_path}:{os.environ['PATH']}", "KOBOI_UC_HOME": "/tmp/qs-fake-docker"}
+
+
+def test_preflight_permission_denied_guides_docker_group(tmp_path):
+    """Linux first-run #1 (the reported bug): the daemon IS running, but this
+    user isn't in the docker group, so `docker info` exits 1 with 'permission
+    denied'. quickstart must NOT claim the daemon is down -- it must point at
+    `usermod -aG docker` (the actual fix)."""
+    env = _fake_docker_env(
+        tmp_path,
+        "Got permission denied while trying to connect to the Docker daemon socket "
+        "at unix:///var/run/docker.sock",
+    )
+    r = _run(["--project", "hr-screening", "--yes"], env=env, timeout=10)
+    assert r.returncode != 0
+    assert "usermod -aG docker" in r.stderr, f"missing docker-group guidance:\n{r.stderr}"
+    # The old misleading "daemon is not running" message must be gone on this path.
+    assert "daemon is not running" not in r.stderr, f"old wrong message still present:\n{r.stderr}"
+
+
+def test_preflight_daemon_down_guides_systemctl(tmp_path):
+    """Linux first-run #2: the daemon is genuinely not running. quickstart must
+    advise `systemctl start docker`."""
+    env = _fake_docker_env(
+        tmp_path,
+        "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. "
+        "Is the docker daemon running?",
+    )
+    r = _run(["--project", "hr-screening", "--yes"], env=env, timeout=10)
+    assert r.returncode != 0
+    assert "systemctl start docker" in r.stderr, f"missing systemctl guidance:\n{r.stderr}"
