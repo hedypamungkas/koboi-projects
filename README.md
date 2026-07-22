@@ -77,7 +77,50 @@ curl -s http://localhost:8001/healthz    # {"status":"ok"}
 # open http://localhost:3001 and chat; see that project's README for the smoke-test curl
 ```
 
-Requires **Docker** ([Docker Desktop](https://docs.docker.com/desktop/) for macOS/Windows, or Docker Engine + the compose plugin on Linux). Read [`docs/00-consuming-koboi-server.md`](docs/00-consuming-koboi-server.md) first — it's the shared contract (frontend ↔ koboi, chat vs. jobs, what's built in vs. what you write) every app below builds on.
+Requires **Docker** ([Docker Desktop](https://docs.docker.com/desktop/) for macOS/Windows, or Docker Engine + the compose plugin on Linux — see the **Linux / VPS setup** steps below). Read [`docs/00-consuming-koboi-server.md`](docs/00-consuming-koboi-server.md) first — it's the shared contract (frontend ↔ koboi, chat vs. jobs, what's built in vs. what you write) every app below builds on.
+
+**Linux / VPS setup (Ubuntu / Debian)** — prep a fresh box, then run the one-liner above:
+
+1. **Install Docker Engine + the Compose plugin** from Docker's official apt repo (avoid the distro's `docker.io` package, which is usually stale). Add the repo, then:
+
+   ```sh
+   sudo apt-get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+   ```
+
+   Full repo-setup steps at [docs.docker.com/engine/install](https://docs.docker.com/engine/install/).
+
+2. **Add your user to the `docker` group** so you don't need `sudo` — and don't hit "permission denied":
+
+   ```sh
+   sudo usermod -aG docker $USER
+   newgrp docker        # activate now, or log out and back in
+   ```
+
+   **This is the fix if `curl ... | bash` fails with a Docker daemon / permission error — the #1 Linux first-run snag.**
+
+3. **Start Docker on boot:**
+
+   ```sh
+   sudo systemctl enable --now docker
+   ```
+
+4. **Firewall / remote access.** Apps bind host ports `3001`–`3010` (web UIs) and `8001`–`8010` (APIs). The frontend derives the API host from the page's own hostname, so the browser must reach **both** the web port *and* the API port for a given app (e.g. `3001` *and* `8001` for ecommerce-support — see the port table below). For a quick remote test, use an **SSH tunnel** that forwards both (opens nothing publicly):
+
+   ```sh
+   ssh -L 3001:localhost:3001 -L 8001:localhost:8001 ubuntu@<vps>     # then open http://localhost:3001 locally
+   ```
+
+   To open ports instead, allow the pair you need — `sudo ufw allow 3001/tcp && sudo ufw allow 8001/tcp`. **Don't open all ports broadly.** (Swap in each app's own `30XX`/`80XX`.)
+
+5. **Headless deploy over SSH** (no prompts) — `--yes` skips every prompt:
+
+   ```sh
+   OPENAI_API_KEY=sk-... ./quickstart.sh --project hr-screening --yes
+   # no checkout? export the key first, then:
+   #   curl -fsSL https://raw.githubusercontent.com/hedypamungkas/koboi-projects/main/quickstart.sh | bash -s -- --project hr-screening --yes
+   ```
+
+> Builds run **natively on the VPS**, so the image matches the host architecture (amd64/arm64) automatically — no `--platform` flag or multi-arch config needed.
 
 ## The ten use cases
 

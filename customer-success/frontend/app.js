@@ -1,7 +1,7 @@
 // app.js -- Account Health observatory (dark vitals UI). Vanilla JS, talks to koboi's
 // single-agent /v1/chat/stream (SSE). Parses the structured churn-risk JSON into a vitals readout.
 
-const API_BASE = window.KOBOI_API_BASE || "http://localhost:8010";
+const API_BASE = window.KOBOI_API_BASE || (window.location.port === "3010" ? `${window.location.protocol}//${window.location.hostname}:8010` : "");
 const API_KEY = window.KOBOI_API_KEY || ""; // auth_required:false for this POC
 
 let sessionId = null;

@@ -1,7 +1,7 @@
 // app.js -- The Competitive Brief (salmon broadsheet UI). Vanilla JS, talks to koboi's
 // deep_research /v1/chat/stream + /v1/jobs (SSE). See docs/00 §3.
 
-const API_BASE = window.KOBOI_API_BASE || "http://localhost:8008";
+const API_BASE = window.KOBOI_API_BASE || (window.location.port === "3008" ? `${window.location.protocol}//${window.location.hostname}:8008` : "");
 const API_KEY = window.KOBOI_API_KEY || "";
 
 let sessionId = null;

@@ -8,6 +8,7 @@ and the `bash -n` + shellcheck syntax gates. Runs the script's own subcommands
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import subprocess
 
@@ -123,3 +124,86 @@ def test_ps1_daemon_check_uses_lastexitcode():
     assert "$LASTEXITCODE" in src, "ps1 daemon check doesn't test $LASTEXITCODE (P0-2)"
     # And the broken try/catch on docker info should be gone.
     assert "try { docker info" not in src, "ps1 still uses try/catch around docker info"
+
+
+def _fake_docker_env(tmp_path, info_line):
+    """Put a fake `docker` on PATH so preflight's daemon check can be exercised
+    without a real daemon. `docker compose ...` -> ok; `docker info` -> print
+    `info_line` to stderr and exit 1 (mirroring how docker reports the reason).
+    Scoped to the subprocess via PATH; does not touch the real docker."""
+    shim = tmp_path / "docker"
+    shim.write_text(
+        "#!/usr/bin/env bash\n"
+        'case "$1" in\n'
+        "  compose) exit 0 ;;\n"
+        f"  info) echo {shlex.quote(info_line)} >&2; exit 1 ;;\n"
+        "esac\n"
+        "exit 0\n"
+    )
+    shim.chmod(0o755)
+    return {"PATH": f"{tmp_path}:{os.environ['PATH']}", "KOBOI_UC_HOME": str(tmp_path / "home")}
+
+
+def test_preflight_permission_denied_guides_docker_group(tmp_path):
+    """Linux first-run #1 (the reported bug): the daemon IS running, but this
+    user isn't in the docker group, so `docker info` exits 1 with 'permission
+    denied'. quickstart must NOT claim the daemon is down -- it must point at
+    `usermod -aG docker` (the actual fix)."""
+    env = _fake_docker_env(
+        tmp_path,
+        "Got permission denied while trying to connect to the Docker daemon socket "
+        "at unix:///var/run/docker.sock",
+    )
+    r = _run(["--project", "hr-screening", "--yes"], env=env, timeout=10)
+    assert r.returncode != 0
+    assert "usermod -aG docker" in r.stderr, f"missing docker-group guidance:\n{r.stderr}"
+    # The old misleading "daemon is not running" message must be gone on this path.
+    assert "daemon is not running" not in r.stderr, f"old wrong message still present:\n{r.stderr}"
+
+
+def test_preflight_daemon_down_guides_systemctl(tmp_path):
+    """Linux first-run #2: the daemon is genuinely not running. quickstart must
+    advise `systemctl start docker`."""
+    env = _fake_docker_env(
+        tmp_path,
+        "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. "
+        "Is the docker daemon running?",
+    )
+    r = _run(["--project", "hr-screening", "--yes"], env=env, timeout=10)
+    assert r.returncode != 0
+    assert "systemctl start docker" in r.stderr, f"missing systemctl guidance:\n{r.stderr}"
+    assert "usermod -aG docker" not in r.stderr, (
+        f"misclassified a daemon-down error as permission-denied:\n{r.stderr}"
+    )
+
+
+def test_preflight_dial_unix_down_guides_systemctl_not_usermod(tmp_path):
+    """Regression: a daemon-DOWN error reported in the raw Go form
+    `dial unix /var/run/docker.sock: connect: connection refused` used to match
+    the permission-denied arm (via a bare *"dial unix"* pattern) and wrongly
+    tell the user to run `usermod -aG docker`. It must route to the daemon-down
+    remedy (`systemctl start docker`)."""
+    env = _fake_docker_env(
+        tmp_path,
+        "dial unix /var/run/docker.sock: connect: connection refused",
+    )
+    r = _run(["--project", "hr-screening", "--yes"], env=env, timeout=10)
+    assert r.returncode != 0
+    assert "systemctl start docker" in r.stderr, f"missing systemctl guidance:\n{r.stderr}"
+    assert "usermod -aG docker" not in r.stderr, (
+        f"misclassified daemon-down (dial unix ... connection refused) as "
+        f"permission-denied:\n{r.stderr}"
+    )
+
+
+def test_preflight_unrecognized_error_hits_catchall(tmp_path):
+    """An unrecognized `docker info` failure must hit the catch-all: exit
+    non-zero AND surface the captured message so the user is never left with a
+    blank reason."""
+    env = _fake_docker_env(tmp_path, "docker: something totally novel went wrong")
+    r = _run(["--project", "hr-screening", "--yes"], env=env, timeout=10)
+    assert r.returncode != 0
+    assert "unexpected error" in r.stderr, f"catch-all die not hit:\n{r.stderr}"
+    assert "something totally novel went wrong" in r.stderr, (
+        f"captured docker message not surfaced in the catch-all:\n{r.stderr}"
+    )

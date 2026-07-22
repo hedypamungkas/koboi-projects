@@ -1,7 +1,7 @@
 // Harbor Realty Group -- buyer chat widget + agent dashboard.
 // Talks directly to the koboi server over HTTP/SSE (docs/00 #3). No build step, no framework.
 
-const API_BASE = window.KOBOI_API_BASE || "http://localhost:8006";
+const API_BASE = window.KOBOI_API_BASE || (window.location.port === "3006" ? `${window.location.protocol}//${window.location.hostname}:8006` : "");
 // server.auth_required is false for this local POC (see config/agent.yaml) so this can stay
 // empty; in production this would be a real Bearer token from `koboi keys create` (docs/00 #4).
 const API_KEY = window.KOBOI_API_KEY || "";

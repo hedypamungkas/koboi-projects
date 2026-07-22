@@ -1,7 +1,7 @@
 // app.js -- Northwind Service Concierge (warm portal UI). Vanilla JS, talks to the concierge
 // koboi instance /v1/chat/stream (SSE). call_peer_agent fan-outs render as department route cards.
 
-const API_BASE = window.KOBOI_API_BASE || "http://localhost:8009";
+const API_BASE = window.KOBOI_API_BASE || (window.location.port === "3009" ? `${window.location.protocol}//${window.location.hostname}:8009` : "");
 const API_KEY = window.KOBOI_API_KEY || "concierge-smoke-key-1234"; // A2A forces auth (see README)
 
 let sessionId = null;
